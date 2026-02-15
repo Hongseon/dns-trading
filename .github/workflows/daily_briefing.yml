@@ -1,0 +1,52 @@
+name: Daily Briefing
+on:
+  schedule:
+    - cron: '0 0 * * *'    # UTC 00:00 = KST 09:00 (daily)
+    - cron: '0 0 * * 1'    # UTC 00:00 = KST 09:00 Monday (weekly)
+    - cron: '0 0 1 * *'    # UTC 00:00 = KST 09:00 1st of month (monthly)
+  workflow_dispatch:
+    inputs:
+      briefing_type:
+        description: 'Briefing type'
+        required: false
+        default: 'daily'
+        type: choice
+        options: [daily, weekly, monthly]
+
+jobs:
+  briefing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ hashFiles('requirements.txt') }}
+      - run: pip install -r requirements.txt
+
+      - name: Determine briefing type
+        id: briefing
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "type=${{ github.event.inputs.briefing_type }}" >> "$GITHUB_OUTPUT"
+          elif [ "$(date -u +%d)" = "01" ]; then
+            echo "type=monthly" >> "$GITHUB_OUTPUT"
+          elif [ "$(date -u +%u)" = "1" ]; then
+            echo "type=weekly" >> "$GITHUB_OUTPUT"
+          else
+            echo "type=daily" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate and send briefing
+        run: python scripts/run_briefing.py ${{ steps.briefing.outputs.type }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          KAKAO_ADMIN_KEY: ${{ secrets.KAKAO_ADMIN_KEY }}
+          KAKAO_CHANNEL_ID: ${{ secrets.KAKAO_CHANNEL_ID }}
