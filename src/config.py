@@ -2,13 +2,13 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    # Supabase
-    supabase_url: str = ""
-    supabase_service_key: str = ""
+    # Zilliz Cloud (Milvus)
+    zilliz_uri: str = ""
+    zilliz_token: str = ""
 
     # Dropbox
     dropbox_access_token: str = ""
-    dropbox_folder_path: str = "/업무"
+    dropbox_folder_path: str = "/DnS 사업관리"
 
     # Naver Mail
     naver_email: str = ""
@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3-flash-preview"
     gemini_fallback_model: str = "gemini-2.5-flash"
-    gemini_embedding_model: str = "text-embedding-004"
+    gemini_embedding_model: str = "gemini-embedding-001"
 
     # KakaoTalk
     kakao_admin_key: str = ""
@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     max_zip_depth: int = 2
     max_zip_extracted_size_mb: int = 50
     supported_extensions: list[str] = [
-        ".pdf", ".docx", ".xlsx", ".pptx",
+        ".pdf", ".docx", ".doc", ".xlsx", ".xls", ".pptx",
         ".hwp", ".hwpx", ".cell",
         ".txt", ".csv", ".zip",
     ]

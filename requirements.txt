@@ -3,8 +3,8 @@ fastapi==0.129.*
 uvicorn==0.40.*
 httpx==0.28.*
 
-# Supabase
-supabase==2.24.*
+# Vector DB (Zilliz Cloud / Milvus)
+pymilvus>=2.5
 
 # LLM + Embedding (Gemini API)
 google-genai==1.*
@@ -17,6 +17,7 @@ imap-tools==1.*
 PyMuPDF==1.27.*
 python-docx==1.*
 openpyxl==3.*
+xlrd==2.*
 python-pptx==1.*
 beautifulsoup4==4.*
 gethwp==1.*

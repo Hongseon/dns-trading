@@ -2,7 +2,7 @@
 
 Connects to Naver's IMAP server, fetches new emails since the last sync,
 extracts body text and attachment content, then chunks, embeds, and indexes
-everything into Supabase.
+everything into Zilliz Cloud.
 
 Usage::
 
@@ -22,7 +22,7 @@ from pathlib import Path
 from imap_tools import AND, MailBox, MailMessage, MailMessageFlags
 
 from src.config import settings
-from src.db.supabase_client import get_client
+from src.db.zilliz_client import get_client
 from src.ingestion.chunker import TextChunker
 from src.ingestion.indexer import DocumentMetadata, Indexer
 from src.ingestion.text_extractor import extract_text
@@ -38,13 +38,13 @@ class NaverMailSync:
 
     On each run the syncer fetches all messages received on or after the
     last sync date (stored in ``sync_state``).  Each message body and its
-    attachments are indexed as separate documents in Supabase.
+    attachments are indexed as separate documents in Zilliz Cloud.
     """
 
     SYNC_TYPE = "email"
 
     def __init__(self) -> None:
-        self._supabase = get_client()
+        self._client = get_client()
         self._chunker = TextChunker()
         self._indexer = Indexer()
 
@@ -320,15 +320,13 @@ class NaverMailSync:
         full initial sync).
         """
         try:
-            response = (
-                self._supabase.table("sync_state")
-                .select("last_sync_time")
-                .eq("sync_type", self.SYNC_TYPE)
-                .limit(1)
-                .execute()
+            results = self._client.query(
+                collection_name="sync_state",
+                filter=f'sync_type == "{self.SYNC_TYPE}"',
+                output_fields=["last_sync_time"],
             )
-            if response.data:
-                raw = response.data[0].get("last_sync_time")
+            if results:
+                raw = results[0].get("last_sync_time")
                 if raw:
                     dt = datetime.fromisoformat(raw)
                     logger.debug("Last email sync time: %s", dt.isoformat())
@@ -344,11 +342,13 @@ class NaverMailSync:
             "sync_type": self.SYNC_TYPE,
             "last_sync_time": now,
             "updated_at": now,
+            "_dummy_vec": [0.0, 0.0],
         }
         try:
-            self._supabase.table("sync_state").upsert(
-                row, on_conflict="sync_type"
-            ).execute()
+            self._client.upsert(
+                collection_name="sync_state",
+                data=[row],
+            )
             logger.debug("Saved email sync state")
         except Exception:
             logger.exception("Failed to save email sync state")

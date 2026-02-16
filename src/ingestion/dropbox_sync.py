@@ -2,7 +2,7 @@
 
 Connects to the Dropbox API, detects file changes via a stored cursor,
 downloads new/modified files, extracts text, chunks, embeds, and indexes
-into Supabase.  Deleted files are removed from the index.
+into Zilliz Cloud.  Deleted files are removed from the index.
 
 Usage::
 
@@ -28,7 +28,7 @@ from dropbox.files import (
 )
 
 from src.config import settings
-from src.db.supabase_client import get_client
+from src.db.zilliz_client import get_client
 from src.ingestion.chunker import TextChunker
 from src.ingestion.indexer import DocumentMetadata, Indexer
 from src.ingestion.text_extractor import extract_files_from_archive, extract_text
@@ -48,7 +48,7 @@ class DropboxSync:
 
     def __init__(self) -> None:
         self._dbx = Dropbox(settings.dropbox_access_token)
-        self._supabase = get_client()
+        self._client = get_client()
         self._chunker = TextChunker()
         self._indexer = Indexer()
 
@@ -146,12 +146,16 @@ class DropboxSync:
         folder_path = str(Path(path_lower).parent)
 
         try:
-            # Delete rows matching filename and folder_path (covers all chunks
-            # including those from ZIP sub-files that share the same parent).
-            self._supabase.table("documents").delete().eq(
-                "source_type", "dropbox"
-            ).eq("filename", filename).eq("folder_path", folder_path).execute()
-
+            escaped_filename = filename.replace('"', '\\"')
+            escaped_folder = folder_path.replace('"', '\\"')
+            self._client.delete(
+                collection_name="documents",
+                filter=(
+                    f'source_type == "dropbox" '
+                    f'and filename == "{escaped_filename}" '
+                    f'and folder_path == "{escaped_folder}"'
+                ),
+            )
             logger.info("Deleted index entries for: %s", path_lower)
             stats["deleted"] += 1
         except Exception:
@@ -313,21 +317,19 @@ class DropboxSync:
         return True
 
     # ------------------------------------------------------------------
-    # Cursor persistence (sync_state table)
+    # Cursor persistence (sync_state collection)
     # ------------------------------------------------------------------
 
     def _load_cursor(self) -> str | None:
-        """Load the Dropbox sync cursor from the ``sync_state`` table."""
+        """Load the Dropbox sync cursor from the ``sync_state`` collection."""
         try:
-            response = (
-                self._supabase.table("sync_state")
-                .select("last_cursor")
-                .eq("sync_type", self.SYNC_TYPE)
-                .limit(1)
-                .execute()
+            results = self._client.query(
+                collection_name="sync_state",
+                filter=f'sync_type == "{self.SYNC_TYPE}"',
+                output_fields=["last_cursor"],
             )
-            if response.data:
-                cursor = response.data[0].get("last_cursor")
+            if results:
+                cursor = results[0].get("last_cursor")
                 if cursor:
                     logger.debug("Loaded Dropbox cursor: %s...", cursor[:20])
                 return cursor
@@ -336,18 +338,20 @@ class DropboxSync:
         return None
 
     def _save_cursor(self, cursor: str) -> None:
-        """Persist the Dropbox sync cursor to the ``sync_state`` table."""
+        """Persist the Dropbox sync cursor to the ``sync_state`` collection."""
         now = datetime.now(timezone.utc).isoformat()
         row = {
             "sync_type": self.SYNC_TYPE,
             "last_cursor": cursor,
             "last_sync_time": now,
             "updated_at": now,
+            "_dummy_vec": [0.0, 0.0],
         }
         try:
-            self._supabase.table("sync_state").upsert(
-                row, on_conflict="sync_type"
-            ).execute()
+            self._client.upsert(
+                collection_name="sync_state",
+                data=[row],
+            )
             logger.debug("Saved Dropbox cursor")
         except Exception:
             logger.exception("Failed to save Dropbox cursor to sync_state")

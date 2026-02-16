@@ -1,6 +1,6 @@
 """Briefing sender -- store-first approach.
 
-Stores generated briefings in the Supabase ``briefings`` table and
+Stores generated briefings in the Zilliz Cloud ``briefings`` collection and
 provides retrieval of the latest briefing by type.  KakaoTalk channel
 push delivery is planned as future work.
 """
@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from src.db.supabase_client import get_client
+from src.db.zilliz_client import get_client
 
 logger = logging.getLogger(__name__)
 
@@ -48,11 +48,29 @@ class BriefingSender:
 
         # Mark the most recent unsent briefing as sent
         try:
-            self.client.table("briefings").update(
-                {"sent": True}
-            ).eq("sent", False).order(
-                "generated_at", desc=True
-            ).limit(1).execute()
+            results = self.client.query(
+                collection_name="briefings",
+                filter='sent == false',
+                output_fields=["id", "briefing_type", "content", "generated_at", "sent"],
+                limit=1,
+            )
+            if results:
+                # Delete and re-insert with sent=True (Milvus has no field-level update)
+                row = results[0]
+                self.client.delete(
+                    collection_name="briefings",
+                    ids=[row["id"]],
+                )
+                self.client.insert(
+                    collection_name="briefings",
+                    data=[{
+                        "briefing_type": row.get("briefing_type", ""),
+                        "content": row.get("content", ""),
+                        "generated_at": row.get("generated_at", ""),
+                        "sent": True,
+                        "_dummy_vec": [0.0, 0.0],
+                    }],
+                )
         except Exception:
             logger.warning(
                 "Could not mark briefing as sent in database",
@@ -86,17 +104,20 @@ class BriefingSender:
             the requested type.
         """
         try:
-            result = (
-                self.client.table("briefings")
-                .select("content")
-                .eq("briefing_type", briefing_type)
-                .order("generated_at", desc=True)
-                .limit(1)
-                .execute()
+            results = self.client.query(
+                collection_name="briefings",
+                filter=f'briefing_type == "{briefing_type}"',
+                output_fields=["content", "generated_at"],
+                limit=10,
             )
 
-            if result.data:
-                content: str = result.data[0]["content"]
+            if results:
+                # Sort by generated_at descending and take the first
+                results.sort(
+                    key=lambda x: x.get("generated_at", ""),
+                    reverse=True,
+                )
+                content: str = results[0].get("content", "")
                 logger.info(
                     "Retrieved latest %s briefing (%d chars)",
                     briefing_type,
@@ -134,15 +155,18 @@ class BriefingSender:
             keys.
         """
         try:
-            result = (
-                self.client.table("briefings")
-                .select("content, generated_at, sent")
-                .eq("briefing_type", briefing_type)
-                .order("generated_at", desc=True)
-                .limit(limit)
-                .execute()
+            results = self.client.query(
+                collection_name="briefings",
+                filter=f'briefing_type == "{briefing_type}"',
+                output_fields=["content", "generated_at", "sent"],
+                limit=limit * 2,  # Fetch extra to sort and trim
             )
-            return result.data or []
+            # Sort by generated_at descending
+            results.sort(
+                key=lambda x: x.get("generated_at", ""),
+                reverse=True,
+            )
+            return results[:limit]
         except Exception:
             logger.exception(
                 "Failed to retrieve recent %s briefings", briefing_type

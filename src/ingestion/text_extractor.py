@@ -1,7 +1,7 @@
 """
 Text extraction module for various file formats.
 
-Supports: PDF, DOCX, XLSX, PPTX, HWP, HWPX, CELL, ZIP, HTML, TXT, CSV.
+Supports: PDF, DOCX, DOC, XLSX, XLS, PPTX, HWP, HWPX, CELL, ZIP, HTML, TXT, CSV.
 Uses a dispatch pattern to route extraction by file extension.
 """
 
@@ -88,6 +88,90 @@ def _extract_xlsx(file_path: Path) -> str:
 
     wb.close()
     return "\n\n".join(parts)
+
+
+def _extract_xls(file_path: Path) -> str:
+    """Extract text from a legacy .xls file using xlrd."""
+    import xlrd
+
+    wb = xlrd.open_workbook(str(file_path))
+    parts: list[str] = []
+
+    for sheet in wb.sheets():
+        rows: list[str] = []
+        for row_idx in range(sheet.nrows):
+            cell_values = [
+                str(sheet.cell_value(row_idx, col_idx))
+                for col_idx in range(sheet.ncols)
+            ]
+            if any(v.strip() for v in cell_values):
+                rows.append("\t".join(cell_values))
+        if rows:
+            parts.append(f"Sheet: {sheet.name}\n" + "\n".join(rows))
+
+    return "\n\n".join(parts)
+
+
+def _extract_doc(file_path: Path) -> str:
+    """Extract text from a legacy .doc file.
+
+    Strategy:
+      1. Try textutil (macOS built-in).
+      2. Try antiword (Linux).
+      3. Fall back to raw binary text extraction.
+    """
+    # Attempt 1: textutil (macOS)
+    try:
+        result = subprocess.run(
+            ["textutil", "-convert", "txt", "-stdout", str(file_path)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except FileNotFoundError:
+        pass
+    except subprocess.TimeoutExpired:
+        logger.warning("textutil timed out for %s", file_path)
+
+    # Attempt 2: antiword (Linux)
+    try:
+        result = subprocess.run(
+            ["antiword", str(file_path)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except FileNotFoundError:
+        pass
+    except subprocess.TimeoutExpired:
+        logger.warning("antiword timed out for %s", file_path)
+
+    # Attempt 3: raw binary text extraction
+    try:
+        raw = file_path.read_bytes()
+        # .doc files often contain readable text mixed with binary.
+        # Extract runs of printable text (Korean + ASCII).
+        text = raw.decode("utf-8", errors="ignore")
+        # Filter to lines with at least some Korean or meaningful ASCII
+        lines: list[str] = []
+        for line in text.splitlines():
+            cleaned = line.strip()
+            if len(cleaned) >= 4 and any(
+                "\uAC00" <= ch <= "\uD7A3" or ch.isascii() and ch.isalpha()
+                for ch in cleaned
+            ):
+                lines.append(cleaned)
+        if lines:
+            return "\n".join(lines)
+    except Exception:
+        logger.debug("Raw text extraction failed for %s", file_path)
+
+    logger.error("All DOC extraction methods failed for %s", file_path)
+    return ""
 
 
 def _extract_pptx(file_path: Path) -> str:
@@ -370,7 +454,9 @@ def extract_files_from_archive(
 _EXTRACTOR_MAP: dict[str, ExtractorFn] = {
     ".pdf": _extract_pdf,
     ".docx": _extract_docx,
+    ".doc": _extract_doc,
     ".xlsx": _extract_xlsx,
+    ".xls": _extract_xls,
     ".pptx": _extract_pptx,
     ".hwp": _extract_hwp,
     ".hwpx": _extract_hwpx,

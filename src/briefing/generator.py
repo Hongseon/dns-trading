@@ -1,6 +1,6 @@
 """Briefing generator for daily, weekly, and monthly summaries.
 
-Queries Supabase for recent documents within the target date range,
+Queries Zilliz Cloud for recent documents within the target date range,
 searches for schedule-related keywords, deduplicates results, and
 uses the Gemini LLM to produce a structured Korean briefing.
 """
@@ -11,7 +11,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from src.db.supabase_client import get_client
+from src.db.zilliz_client import get_client
 from src.rag.retriever import Retriever
 from src.rag.generator import Generator
 
@@ -187,31 +187,34 @@ class BriefingGenerator:
         start: datetime,
         end: datetime,
     ) -> list[dict[str, Any]]:
-        """Query the documents table filtered by ``created_date`` range.
+        """Query the documents collection filtered by ``created_date`` range.
 
         Returns up to 50 documents ordered by recency.
         """
         try:
-            response = (
-                self.client.table("documents")
-                .select(
-                    "id, source_type, content, filename, "
-                    "email_subject, email_from, created_date"
-                )
-                .gte("created_date", start.isoformat())
-                .lte("created_date", end.isoformat())
-                .order("created_date", desc=True)
-                .limit(50)
-                .execute()
+            start_iso = start.isoformat()
+            end_iso = end.isoformat()
+            results = self.client.query(
+                collection_name="documents",
+                filter=f'created_date >= "{start_iso}" and created_date <= "{end_iso}"',
+                output_fields=[
+                    "source_type", "content", "filename",
+                    "email_subject", "email_from", "created_date",
+                ],
+                limit=50,
             )
-            docs: list[dict[str, Any]] = response.data or []
+            # Sort by created_date descending (Milvus query doesn't support ORDER BY)
+            results.sort(
+                key=lambda x: x.get("created_date", ""),
+                reverse=True,
+            )
             logger.info(
                 "Fetched %d documents by date range (%s ~ %s)",
-                len(docs),
+                len(results),
                 start.strftime("%Y-%m-%d"),
                 end.strftime("%Y-%m-%d"),
             )
-            return docs
+            return results
         except Exception:
             logger.exception("Failed to fetch documents by date range")
             return []
@@ -323,14 +326,19 @@ class BriefingGenerator:
     # ------------------------------------------------------------------
 
     def _save_briefing(self, briefing_type: str, content: str) -> None:
-        """Insert the generated briefing into the ``briefings`` table."""
+        """Insert the generated briefing into the ``briefings`` collection."""
+        now = datetime.now(timezone.utc).isoformat()
         try:
-            self.client.table("briefings").insert(
-                {
+            self.client.insert(
+                collection_name="briefings",
+                data=[{
                     "briefing_type": briefing_type,
-                    "content": content,
-                }
-            ).execute()
+                    "content": content[:10000],  # VARCHAR limit
+                    "generated_at": now,
+                    "sent": False,
+                    "_dummy_vec": [0.0, 0.0],
+                }],
+            )
             logger.info("Briefing saved to database (type=%s)", briefing_type)
         except Exception:
             logger.exception(

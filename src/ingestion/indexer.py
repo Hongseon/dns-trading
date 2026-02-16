@@ -1,7 +1,7 @@
-"""Document chunk indexer for Supabase (pgvector).
+"""Document chunk indexer for Zilliz Cloud (Milvus).
 
 Responsible for embedding text chunks and upserting them into the
-``documents`` table.  On update the old rows for a given ``source_id``
+``documents`` collection.  On update the old rows for a given ``source_id``
 are deleted first so stale chunks never linger.
 """
 
@@ -9,14 +9,15 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
-from src.db.supabase_client import get_client
+from src.db.zilliz_client import get_client
 from src.ingestion.chunker import Chunk
 from src.rag.embedder import Embedder
 
 logger = logging.getLogger(__name__)
 
-# Maximum rows per Supabase insert call.
+# Maximum rows per Milvus insert call.
 _BATCH_SIZE = 100
 
 
@@ -43,7 +44,7 @@ class DocumentMetadata:
 
 
 class Indexer:
-    """Embeds and indexes document chunks into Supabase."""
+    """Embeds and indexes document chunks into Zilliz Cloud."""
 
     def __init__(self) -> None:
         self._embedder = Embedder()
@@ -107,9 +108,12 @@ class Indexer:
     def delete_document(self, source_id: str) -> None:
         """Remove all chunk rows for a given *source_id*."""
         try:
-            self._client.table("documents").delete().eq(
-                "source_id", source_id
-            ).execute()
+            # Escape double quotes in source_id for filter expression
+            escaped_id = source_id.replace('"', '\\"')
+            self._client.delete(
+                collection_name="documents",
+                filter=f'source_id == "{escaped_id}"',
+            )
             logger.debug("Deleted existing rows for source_id=%s", source_id)
         except Exception:
             logger.exception(
@@ -127,38 +131,26 @@ class Indexer:
         metadata: DocumentMetadata,
     ) -> list[dict]:
         """Combine chunks, embeddings, and metadata into insert-ready dicts."""
+        now = datetime.now(timezone.utc).isoformat()
         rows: list[dict] = []
-        for idx, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
+        for chunk, embedding in zip(chunks, embeddings):
             row: dict = {
                 "source_type": metadata.source_type,
                 "source_id": metadata.source_id,
-                "content": chunk.text,
+                "content": chunk.text[:10000],  # VARCHAR limit
                 "embedding": embedding,
                 "chunk_index": chunk.chunk_index,
+                "updated_date": now,
+                # Default empty strings for optional fields
+                "created_date": metadata.created_date or "",
+                "filename": metadata.filename or "",
+                "folder_path": metadata.folder_path or "",
+                "file_type": metadata.file_type or "",
+                "email_from": metadata.email_from or "",
+                "email_to": metadata.email_to or "",
+                "email_subject": metadata.email_subject or "",
+                "email_date": metadata.email_date or "",
             }
-
-            # Common metadata
-            if metadata.created_date is not None:
-                row["created_date"] = metadata.created_date
-
-            # Dropbox metadata
-            if metadata.filename is not None:
-                row["filename"] = metadata.filename
-            if metadata.folder_path is not None:
-                row["folder_path"] = metadata.folder_path
-            if metadata.file_type is not None:
-                row["file_type"] = metadata.file_type
-
-            # Email metadata
-            if metadata.email_from is not None:
-                row["email_from"] = metadata.email_from
-            if metadata.email_to is not None:
-                row["email_to"] = metadata.email_to
-            if metadata.email_subject is not None:
-                row["email_subject"] = metadata.email_subject
-            if metadata.email_date is not None:
-                row["email_date"] = metadata.email_date
-
             rows.append(row)
         return rows
 
@@ -169,7 +161,10 @@ class Indexer:
         for start in range(0, len(rows), _BATCH_SIZE):
             batch = rows[start : start + _BATCH_SIZE]
             try:
-                self._client.table("documents").insert(batch).execute()
+                self._client.insert(
+                    collection_name="documents",
+                    data=batch,
+                )
                 inserted += len(batch)
             except Exception:
                 logger.warning(
@@ -187,7 +182,10 @@ class Indexer:
         count = 0
         for row in rows:
             try:
-                self._client.table("documents").insert(row).execute()
+                self._client.insert(
+                    collection_name="documents",
+                    data=[row],
+                )
                 count += 1
             except Exception:
                 logger.error(

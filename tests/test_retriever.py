@@ -1,6 +1,6 @@
 """Tests for src.rag.retriever.Retriever helper methods.
 
-The Supabase client and Embedder are fully mocked so no external services or
+The Zilliz client and Embedder are fully mocked so no external services or
 API keys are required.  Only the formatting and source-extraction logic is
 tested here -- the actual vector search round-trip is covered by integration
 tests.
@@ -20,7 +20,7 @@ import pytest
 
 @pytest.fixture
 def retriever():
-    """Create a Retriever with mocked Embedder and Supabase client."""
+    """Create a Retriever with mocked Embedder and Zilliz client."""
     with patch("src.rag.retriever.Embedder") as MockEmbedder, \
          patch("src.rag.retriever.get_client") as mock_get_client:
         # Mock the embedder
@@ -28,7 +28,7 @@ def retriever():
         mock_embedder_instance.embed.return_value = [0.0] * 768
         MockEmbedder.return_value = mock_embedder_instance
 
-        # Mock the Supabase client
+        # Mock the Zilliz client
         mock_client = MagicMock()
         mock_get_client.return_value = mock_client
 

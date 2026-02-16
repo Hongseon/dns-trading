@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Verify that all required Supabase tables exist.
+"""Verify that all required Zilliz Cloud collections exist.
 
-Run this script after applying ``src/db/schema.sql`` to your Supabase
-project to confirm that the tables are reachable.
+Creates collections if they don't exist, then verifies they are reachable.
 
 Usage::
 
@@ -23,7 +22,7 @@ _project_root = str(Path(__file__).resolve().parent.parent)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-from src.db.supabase_client import get_client  # noqa: E402
+from src.db.zilliz_client import get_client, init_collections  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,31 +30,41 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-_REQUIRED_TABLES = ["documents", "sync_state", "briefings"]
+_REQUIRED_COLLECTIONS = ["documents", "sync_state", "briefings"]
 
 
 def main() -> None:
-    """Query each required table to verify it exists and is accessible."""
+    """Create collections if needed, then verify they exist."""
+    # Initialize collections (creates if not exists)
+    init_collections()
+
+    # Verify each collection is accessible
     client = get_client()
     errors: list[str] = []
 
-    for table in _REQUIRED_TABLES:
+    for collection in _REQUIRED_COLLECTIONS:
         try:
-            client.table(table).select("id").limit(1).execute()
-            logger.info("Table '%s' -- OK", table)
+            if client.has_collection(collection):
+                stats = client.get_collection_stats(collection)
+                row_count = stats.get("row_count", 0)
+                logger.info(
+                    "Collection '%s' -- OK (%s rows)", collection, row_count
+                )
+            else:
+                logger.error("Collection '%s' -- NOT FOUND", collection)
+                errors.append(collection)
         except Exception as exc:
-            logger.error("Table '%s' -- FAILED: %s", table, exc)
-            errors.append(table)
+            logger.error("Collection '%s' -- FAILED: %s", collection, exc)
+            errors.append(collection)
 
     if errors:
         logger.error(
-            "Verification failed for table(s): %s. "
-            "Please run src/db/schema.sql against your Supabase project.",
+            "Verification failed for collection(s): %s.",
             ", ".join(errors),
         )
         sys.exit(1)
 
-    print("\nAll tables verified successfully.")
+    print("\nAll collections verified successfully.")
 
 
 if __name__ == "__main__":

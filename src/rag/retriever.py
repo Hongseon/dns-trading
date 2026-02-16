@@ -1,8 +1,8 @@
-"""Vector search retriever backed by Supabase pgvector.
+"""Vector search retriever backed by Zilliz Cloud (Milvus).
 
-Embeds the user query via :class:`Embedder`, calls the ``match_documents``
-RPC function in Supabase, and provides helpers for formatting results into
-LLM context and extracting source citations.
+Embeds the user query via :class:`Embedder`, performs ANN search on the
+``documents`` collection in Zilliz, and provides helpers for formatting
+results into LLM context and extracting source citations.
 """
 
 from __future__ import annotations
@@ -11,14 +11,25 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from src.db.supabase_client import get_client
+from src.db.zilliz_client import get_client
 from src.rag.embedder import Embedder
 
 logger = logging.getLogger(__name__)
 
+_OUTPUT_FIELDS = [
+    "source_type",
+    "source_id",
+    "content",
+    "filename",
+    "folder_path",
+    "email_subject",
+    "email_from",
+    "created_date",
+]
+
 
 class Retriever:
-    """Retrieve relevant document chunks from Supabase via vector similarity."""
+    """Retrieve relevant document chunks from Zilliz via vector similarity."""
 
     def __init__(self) -> None:
         self.embedder = Embedder()
@@ -53,25 +64,46 @@ class Retriever:
         Returns
         -------
         list[dict]
-            Each dict mirrors the columns returned by the
-            ``match_documents`` RPC: ``id``, ``source_type``, ``content``,
+            Each dict has keys: ``id``, ``source_type``, ``content``,
             ``filename``, ``email_subject``, ``email_from``,
             ``created_date``, ``similarity``.
         """
         query_embedding = self.embedder.embed(query)
 
-        rpc_params: dict[str, Any] = {
-            "query_embedding": query_embedding,
-            "match_count": top_k,
-            "filter_source_type": source_type,
-            "filter_after_date": after_date,
-        }
+        # Build filter expression
+        filter_parts: list[str] = []
+        if source_type:
+            filter_parts.append(f'source_type == "{source_type}"')
+        if after_date:
+            filter_parts.append(f'created_date >= "{after_date}"')
+
+        filter_expr = " and ".join(filter_parts) if filter_parts else ""
 
         try:
-            response = self.client.rpc("match_documents", rpc_params).execute()
-            results: list[dict[str, Any]] = response.data or []
+            raw_results = self.client.search(
+                collection_name="documents",
+                data=[query_embedding],
+                filter=filter_expr if filter_expr else None,
+                limit=top_k,
+                output_fields=_OUTPUT_FIELDS,
+                search_params={"metric_type": "COSINE"},
+            )
+
+            # Milvus returns list of list of hits; we use the first query's results
+            results: list[dict[str, Any]] = []
+            if raw_results and len(raw_results) > 0:
+                for hit in raw_results[0]:
+                    doc = {
+                        "id": hit["id"],
+                        "similarity": hit["distance"],
+                    }
+                    entity = hit.get("entity", hit)
+                    for field in _OUTPUT_FIELDS:
+                        doc[field] = entity.get(field, None)
+                    results.append(doc)
+
         except Exception:
-            logger.exception("match_documents RPC failed for query: %s", query[:80])
+            logger.exception("Zilliz search failed for query: %s", query[:80])
             return []
 
         logger.info(
@@ -114,7 +146,7 @@ class Retriever:
             sim_str = f" (유사도: {similarity:.2f})" if similarity is not None else ""
 
             parts.append(
-                f"[문서 {idx}] {label}{sim_str}\n{doc.get('content', '').strip()}"
+                f"[문서 {idx}] {label}{sim_str}\n{(doc.get('content') or '').strip()}"
             )
 
         return "\n\n".join(parts)
@@ -225,13 +257,13 @@ class Retriever:
 
 def _format_date(value: Any) -> str:
     """Best-effort date formatting to ``YYYY-MM-DD``."""
-    if value is None:
+    if value is None or value == "":
         return "날짜 없음"
 
     if isinstance(value, datetime):
         return value.strftime("%Y-%m-%d")
 
-    # value is likely an ISO string from Supabase
+    # value is likely an ISO string
     try:
         dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
         return dt.strftime("%Y-%m-%d")
