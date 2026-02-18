@@ -45,8 +45,8 @@ jobs:
       - name: Generate and send briefing
         run: python scripts/run_briefing.py ${{ steps.briefing.outputs.type }}
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          ZILLIZ_URI: ${{ secrets.ZILLIZ_URI }}
+          ZILLIZ_TOKEN: ${{ secrets.ZILLIZ_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           KAKAO_ADMIN_KEY: ${{ secrets.KAKAO_ADMIN_KEY }}
           KAKAO_CHANNEL_ID: ${{ secrets.KAKAO_CHANNEL_ID }}

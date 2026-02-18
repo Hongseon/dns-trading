@@ -7,7 +7,10 @@ class Settings(BaseSettings):
     zilliz_token: str = ""
 
     # Dropbox
-    dropbox_access_token: str = ""
+    dropbox_app_key: str = ""
+    dropbox_app_secret: str = ""
+    dropbox_refresh_token: str = ""
+    dropbox_access_token: str = ""  # legacy fallback
     dropbox_folder_path: str = "/DnS 사업관리"
 
     # Naver Mail

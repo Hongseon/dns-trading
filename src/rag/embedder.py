@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from typing import Sequence
 
 from google import genai
@@ -23,6 +24,7 @@ logger = logging.getLogger(__name__)
 _BATCH_SIZE = 100  # max texts per single API call
 _MIN_INTERVAL = 1.0  # seconds between API calls
 _MAX_RETRIES = 8
+_API_TIMEOUT = 60  # seconds per API call before timeout
 
 
 class Embedder:
@@ -57,19 +59,31 @@ class Embedder:
         self._last_call_time = time.monotonic()
 
     def _call_embed_api(self, contents) -> list[list[float]]:
-        """Call embed_content with retry on 429."""
+        """Call embed_content with retry on 429 and timeout protection."""
         for attempt in range(_MAX_RETRIES):
             self._pace()
+            executor = ThreadPoolExecutor(max_workers=1)
             try:
-                result = self._client.models.embed_content(
+                future = executor.submit(
+                    self._client.models.embed_content,
                     model=self._model,
                     contents=contents,
                     config=types.EmbedContentConfig(
                         output_dimensionality=settings.embedding_dim,
                     ),
                 )
+                result = future.result(timeout=_API_TIMEOUT)
+                executor.shutdown(wait=False)
                 return [list(e.values) for e in result.embeddings]
+            except FuturesTimeoutError:
+                logger.warning(
+                    "Embedding API timeout (attempt %d/%d, %ds)",
+                    attempt + 1, _MAX_RETRIES, _API_TIMEOUT,
+                )
+                executor.shutdown(wait=False)
+                time.sleep(5)
             except Exception as e:
+                executor.shutdown(wait=False)
                 if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
                     wait = min(2 ** attempt * 5, 65)
                     logger.warning(

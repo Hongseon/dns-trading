@@ -47,7 +47,14 @@ class DropboxSync:
     SYNC_TYPE = "dropbox"
 
     def __init__(self) -> None:
-        self._dbx = Dropbox(settings.dropbox_access_token)
+        if settings.dropbox_refresh_token:
+            self._dbx = Dropbox(
+                app_key=settings.dropbox_app_key,
+                app_secret=settings.dropbox_app_secret,
+                oauth2_refresh_token=settings.dropbox_refresh_token,
+            )
+        else:
+            self._dbx = Dropbox(settings.dropbox_access_token)
         self._client = get_client()
         self._chunker = TextChunker()
         self._indexer = Indexer()

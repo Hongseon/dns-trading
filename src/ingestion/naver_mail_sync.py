@@ -30,7 +30,27 @@ from src.ingestion.text_extractor import extract_text
 logger = logging.getLogger(__name__)
 
 # Folders to sync from Naver Mail
-_FOLDERS_TO_SYNC: list[str] = ["INBOX", "Sent"]
+_FOLDERS_TO_SYNC: list[str] = [
+    "INBOX",
+    "Sent Messages",
+    "CAS",
+    "SOI",
+    "Nanotech",
+    "DAPA",
+    "RKCC",
+    "기타 재포장",
+    "내게쓴메일함",
+    "군사항공연구원",
+    "주요편지",
+    "구메일",
+    "RedSun",
+    "선사(선진로지스틱스)",
+    "선사(선진로지스틱스)/하자 포워더(AGL)",
+    "선사(선진로지스틱스)/PNL",
+    "선사(선진로지스틱스)/MNL(FAST ROPE)",
+    "선사(선진로지스틱스)/SKY RODE",
+    "선사(선진로지스틱스)/CJ 대한통운",
+]
 
 
 class NaverMailSync:

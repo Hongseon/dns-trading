@@ -200,19 +200,24 @@ def _extract_hwp(file_path: Path) -> str:
     Extract text from an HWP (Hangul Word Processor) file.
 
     Strategy:
-      1. Try gethwp library first.
+      1. Try gethwp.read_hwp() first.
       2. Fall back to hwp5txt CLI.
     """
-    # Attempt 1: gethwp library
+    # Attempt 1: gethwp.read_hwp
     try:
-        from gethwp import GetHwp
+        from gethwp import read_hwp
 
-        hwp = GetHwp()
-        text = hwp.get_text(str(file_path))
+        text = read_hwp(str(file_path))
         if text and text.strip():
-            return text.strip()
+            # Clean up common OLE artifacts (binary garbage chars)
+            cleaned = "".join(
+                ch for ch in text
+                if ch.isprintable() or ch in ("\n", "\t", "\r")
+            )
+            if cleaned.strip():
+                return cleaned.strip()
     except Exception as exc:
-        logger.debug("gethwp failed for %s: %s. Trying hwp5txt CLI.", file_path, exc)
+        logger.debug("gethwp.read_hwp failed for %s: %s. Trying hwp5txt CLI.", file_path, exc)
 
     # Attempt 2: hwp5txt CLI
     try:
@@ -243,16 +248,15 @@ def _extract_hwpx(file_path: Path) -> str:
       1. Try gethwp library first.
       2. Fall back to ZIP/XML parsing (HWPX is a ZIP containing XML with hp:t text tags).
     """
-    # Attempt 1: gethwp library
+    # Attempt 1: gethwp.read_hwpx
     try:
-        from gethwp import GetHwp
+        from gethwp import read_hwpx
 
-        hwp = GetHwp()
-        text = hwp.get_text(str(file_path))
+        text = read_hwpx(str(file_path))
         if text and text.strip():
             return text.strip()
     except Exception as exc:
-        logger.debug("gethwp failed for HWPX %s: %s. Trying ZIP/XML parsing.", file_path, exc)
+        logger.debug("gethwp.read_hwpx failed for %s: %s. Trying ZIP/XML parsing.", file_path, exc)
 
     # Attempt 2: ZIP/XML parsing
     try:

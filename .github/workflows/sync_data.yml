@@ -21,9 +21,11 @@ jobs:
       - run: pip install -r requirements.txt
       - run: python scripts/full_sync.py
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          DROPBOX_ACCESS_TOKEN: ${{ secrets.DROPBOX_ACCESS_TOKEN }}
+          ZILLIZ_URI: ${{ secrets.ZILLIZ_URI }}
+          ZILLIZ_TOKEN: ${{ secrets.ZILLIZ_TOKEN }}
+          DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
+          DROPBOX_APP_SECRET: ${{ secrets.DROPBOX_APP_SECRET }}
+          DROPBOX_REFRESH_TOKEN: ${{ secrets.DROPBOX_REFRESH_TOKEN }}
           DROPBOX_FOLDER_PATH: ${{ secrets.DROPBOX_FOLDER_PATH }}
           NAVER_EMAIL: ${{ secrets.NAVER_EMAIL }}
           NAVER_PASSWORD: ${{ secrets.NAVER_PASSWORD }}
