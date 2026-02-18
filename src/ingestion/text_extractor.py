@@ -31,15 +31,105 @@ ExtractorFn = Callable[[Path], str]
 # ---------------------------------------------------------------------------
 
 def _extract_pdf(file_path: Path) -> str:
-    """Extract text from a PDF using PyMuPDF (fitz)."""
+    """Extract text from a PDF using PyMuPDF, with OCR fallback for scanned PDFs."""
     import fitz  # PyMuPDF
 
+    # 1st: standard text extraction
     texts: list[str] = []
     with fitz.open(str(file_path)) as doc:
-        for page_num, page in enumerate(doc, start=1):
+        for page in doc:
             page_text = page.get_text()
             if page_text and page_text.strip():
                 texts.append(page_text.strip())
+
+    if texts:
+        return "\n\n".join(texts)
+
+    # 2nd: OCR fallback for scanned/image PDFs
+    if settings.ocr_enabled:
+        return _extract_pdf_ocr(file_path)
+
+    return ""
+
+
+# ---------------------------------------------------------------------------
+# OCR singleton + PDF OCR extractor
+# ---------------------------------------------------------------------------
+
+_ocr_engine = None
+
+
+def _get_ocr_engine():
+    """Lazily initialise and return a PaddleOCR instance (singleton)."""
+    global _ocr_engine
+    if _ocr_engine is not None:
+        return _ocr_engine
+
+    try:
+        from paddleocr import PaddleOCR
+
+        _ocr_engine = PaddleOCR(lang=settings.ocr_lang)
+        logger.info("PaddleOCR initialised (lang=%s)", settings.ocr_lang)
+        return _ocr_engine
+    except ImportError:
+        logger.warning(
+            "PaddleOCR is not installed. Scanned PDF OCR is unavailable. "
+            "Install with: pip install paddlepaddle paddleocr"
+        )
+        return None
+
+
+def _extract_pdf_ocr(file_path: Path) -> str:
+    """Extract text from a scanned PDF by rendering pages to images and running OCR."""
+    import fitz  # PyMuPDF
+
+    ocr = _get_ocr_engine()
+    if ocr is None:
+        return ""
+
+    dpi = settings.ocr_dpi
+    texts: list[str] = []
+    tmp_img: str | None = None
+
+    try:
+        with fitz.open(str(file_path)) as doc:
+            for page_idx, page in enumerate(doc):
+                pixmap = page.get_pixmap(dpi=dpi)
+
+                # Save to temp file (PaddleOCR 3.x expects a file path)
+                tmp_img = tempfile.mktemp(suffix=".png", prefix="ocr_page_")
+                pixmap.save(tmp_img)
+
+                result = ocr.predict(input=tmp_img, return_word_box=False)
+
+                # Clean up temp image immediately
+                if os.path.exists(tmp_img):
+                    os.unlink(tmp_img)
+                    tmp_img = None
+
+                if not result or not result[0]:
+                    continue
+
+                rec_texts = result[0]["rec_texts"]
+                page_lines: list[str] = []
+                for item in rec_texts:
+                    line = item.strip() if isinstance(item, str) else str(item).strip()
+                    if line:
+                        page_lines.append(line)
+
+                if page_lines:
+                    texts.append("\n".join(page_lines))
+
+        if texts:
+            logger.info(
+                "OCR extracted text from %d pages of %s", len(texts), file_path.name
+            )
+    except Exception as exc:
+        logger.error("PDF OCR failed for %s: %s", file_path, exc)
+    finally:
+        if tmp_img and os.path.exists(tmp_img):
+            os.unlink(tmp_img)
+
     return "\n\n".join(texts)
 
 

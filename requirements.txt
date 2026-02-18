@@ -25,6 +25,10 @@ pyhwp==0.1b15
 olefile>=0.47
 lxml
 
+# OCR (optional - for scanned PDF processing, not needed on Render server)
+paddlepaddle>=3.0
+paddleocr>=3.0
+
 # Utilities
 python-dotenv==1.*
 pydantic==2.*

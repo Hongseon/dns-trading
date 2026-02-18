@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     max_file_size_mb: int = 10
     max_zip_depth: int = 2
     max_zip_extracted_size_mb: int = 50
+
+    # OCR settings (optional - for scanned PDF processing)
+    ocr_enabled: bool = True
+    ocr_lang: str = "korean"
+    ocr_dpi: int = 300
     supported_extensions: list[str] = [
         ".pdf", ".docx", ".doc", ".xlsx", ".xls", ".pptx",
         ".hwp", ".hwpx", ".cell",
