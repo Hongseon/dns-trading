@@ -28,6 +28,12 @@ _TYPE_LABELS: dict[str, str] = {
     "monthly": "월간",
 }
 
+# DnS staff email addresses (used to distinguish sent vs received)
+_DNS_STAFF_EMAILS: set[str] = {
+    "theking57@naver.com",
+    "ruthkim2015@naver.com",
+}
+
 _TASK_KEYWORDS: list[str] = [
     "일정",
     "마감",
@@ -59,8 +65,11 @@ _DAILY_PROMPT = """\
 == 최근 변동된 파일 ({file_count}건) ==
 {files_section}
 
-== 최근 수신/발신 이메일 ({email_count}건) ==
-{emails_section}
+== 받은 메일 ({received_count}건) ==
+{received_section}
+
+== 보낸 메일 ({sent_count}건) ==
+{sent_section}
 
 == 업무/일정 관련 문서 ({task_count}건) ==
 {tasks_section}
@@ -72,8 +81,11 @@ _DAILY_PROMPT = """\
 [파일 변동 사항]
 • 새로 추가/수정된 파일과 주요 내용 요약
 
-[이메일 요약]
-• 주요 수신/발신 메일의 핵심 내용
+[받은 메일 요약]
+• 외부에서 수신한 주요 메일의 핵심 내용
+
+[보낸 메일 요약]
+• DnS 직원이 발신한 주요 메일의 핵심 내용
 
 [오늘의 할 일]
 ⚠️ 마감 임박 항목
@@ -93,8 +105,11 @@ _WEEKLY_PROMPT = """\
 == 이번 주 변동된 파일 ({file_count}건) ==
 {files_section}
 
-== 이번 주 수신/발신 이메일 ({email_count}건) ==
-{emails_section}
+== 이번 주 받은 메일 ({received_count}건) ==
+{received_section}
+
+== 이번 주 보낸 메일 ({sent_count}건) ==
+{sent_section}
 
 == 업무/일정 관련 문서 ({task_count}건) ==
 {tasks_section}
@@ -105,6 +120,12 @@ _WEEKLY_PROMPT = """\
 
 [이번 주 주요 활동]
 • 주요 파일 작업 및 메일 활동 요약 (3~5개)
+
+[받은 메일 요약]
+• 외부에서 수신한 주요 메일의 핵심 내용
+
+[보낸 메일 요약]
+• DnS 직원이 발신한 주요 메일의 핵심 내용
 
 [프로젝트별 진행 상황]
 • 프로젝트/계약 단위로 진행 상황 정리
@@ -127,8 +148,11 @@ _MONTHLY_PROMPT = """\
 == 이번 달 변동된 파일 ({file_count}건) ==
 {files_section}
 
-== 이번 달 수신/발신 이메일 ({email_count}건) ==
-{emails_section}
+== 이번 달 받은 메일 ({received_count}건) ==
+{received_section}
+
+== 이번 달 보낸 메일 ({sent_count}건) ==
+{sent_section}
 
 == 업무/일정 관련 문서 ({task_count}건) ==
 {tasks_section}
@@ -139,6 +163,12 @@ _MONTHLY_PROMPT = """\
 
 [이번 달 주요 성과]
 • 완료된 주요 업무 (3~5개)
+
+[받은 메일 요약]
+• 외부에서 수신한 주요 메일의 핵심 내용
+
+[보낸 메일 요약]
+• DnS 직원이 발신한 주요 메일의 핵심 내용
 
 [프로젝트별 진행 현황]
 • 프로젝트/계약 단위 현황 정리
@@ -206,12 +236,13 @@ class BriefingGenerator:
             end.isoformat(),
         )
 
-        # Collect data in three categories
+        # Collect data in categories
         data = self._collect_briefing_data(briefing_type, start, end)
 
         has_data = (
             data["recent_files"]
-            or data["recent_emails"]
+            or data["received_emails"]
+            or data["sent_emails"]
             or data["upcoming_tasks"]
         )
         if not has_data:
@@ -264,7 +295,7 @@ class BriefingGenerator:
         end_iso = end.isoformat()
 
         file_limit = 15 if briefing_type == "daily" else 30
-        email_limit = 15 if briefing_type == "daily" else 30
+        email_limit = 30 if briefing_type == "daily" else 60
 
         # 1. Recently changed Dropbox files (by updated_date = indexing time)
         recent_files = self.retriever.search_by_date_range(
@@ -276,7 +307,7 @@ class BriefingGenerator:
         )
 
         # 2. Recent emails (by created_date = email date)
-        recent_emails = self.retriever.search_by_date_range(
+        all_emails = self.retriever.search_by_date_range(
             date_field="created_date",
             start_date=start_iso,
             end_date=end_iso,
@@ -284,12 +315,23 @@ class BriefingGenerator:
             limit=email_limit,
         )
 
+        # Split into received vs sent based on DnS staff addresses
+        received_emails: list[dict[str, Any]] = []
+        sent_emails: list[dict[str, Any]] = []
+        for email in all_emails:
+            sender = (email.get("email_from") or "").lower().strip()
+            if sender in _DNS_STAFF_EMAILS:
+                sent_emails.append(email)
+            else:
+                received_emails.append(email)
+
         # 3. Upcoming tasks / schedule-related (vector search)
         upcoming_tasks = self._search_upcoming_tasks(start_iso)
 
         return {
             "recent_files": recent_files,
-            "recent_emails": recent_emails,
+            "received_emails": received_emails,
+            "sent_emails": sent_emails,
             "upcoming_tasks": upcoming_tasks,
         }
 
@@ -340,15 +382,18 @@ class BriefingGenerator:
     ) -> str:
         """Build the LLM prompt with separated file/email/task sections."""
         files_section = self._format_files(data["recent_files"])
-        emails_section = self._format_emails(data["recent_emails"])
+        received_section = self._format_emails(data["received_emails"], label="받은")
+        sent_section = self._format_emails(data["sent_emails"], label="보낸")
         tasks_section = self._format_tasks(data["upcoming_tasks"])
 
         template = _PROMPTS[briefing_type]
         return template.format(
             file_count=len(data["recent_files"]),
             files_section=files_section,
-            email_count=len(data["recent_emails"]),
-            emails_section=emails_section,
+            received_count=len(data["received_emails"]),
+            received_section=received_section,
+            sent_count=len(data["sent_emails"]),
+            sent_section=sent_section,
             task_count=len(data["upcoming_tasks"]),
             tasks_section=tasks_section,
             date=now_kst.strftime("%Y-%m-%d %a"),
@@ -387,10 +432,10 @@ class BriefingGenerator:
         return "\n\n".join(parts)
 
     @staticmethod
-    def _format_emails(docs: list[dict[str, Any]]) -> str:
+    def _format_emails(docs: list[dict[str, Any]], label: str = "") -> str:
         """Format emails as '[subject] from sender - date'."""
         if not docs:
-            return "(수신/발신 메일 없음)"
+            return f"({label} 메일 없음)" if label else "(메일 없음)"
 
         parts: list[str] = []
         for idx, doc in enumerate(docs, start=1):
