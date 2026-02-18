@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     # OCR settings (optional - for scanned PDF processing)
     ocr_enabled: bool = True
     ocr_lang: str = "korean"
-    ocr_dpi: int = 300
+    ocr_dpi: int = 150
     supported_extensions: list[str] = [
         ".pdf", ".docx", ".doc", ".xlsx", ".xls", ".pptx",
         ".hwp", ".hwpx", ".cell",

@@ -4,25 +4,34 @@ Lists all PDF files in Dropbox, checks which ones are missing from Zilliz
 (i.e. were skipped because text extraction returned empty), downloads them,
 runs OCR via PaddleOCR, and indexes the extracted text.
 
+Supports parallel processing with multiple worker processes for faster OCR.
+
 Usage::
 
     # Dry run — list skipped PDFs without processing
     python scripts/ocr_reprocess.py --dry-run
 
-    # Process all skipped PDFs
+    # Process all skipped PDFs (auto-detects worker count)
     python scripts/ocr_reprocess.py
+
+    # Use 4 parallel workers
+    python scripts/ocr_reprocess.py --workers 4
 
     # Limit to N files (useful for testing)
     python scripts/ocr_reprocess.py --limit 10
 
     # Resume from a specific file index (skip first N)
     python scripts/ocr_reprocess.py --offset 100
+
+    # Override OCR DPI (default 150, higher = slower but more detail)
+    python scripts/ocr_reprocess.py --dpi 200
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
+import multiprocessing as mp
 import os
 import sys
 import tempfile
@@ -50,6 +59,11 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)
+
+
+# ======================================================================
+# Dropbox & Zilliz helpers
+# ======================================================================
 
 
 def _get_dropbox_client() -> Dropbox:
@@ -89,7 +103,7 @@ def _list_all_pdfs(dbx: Dropbox, folder_path: str) -> list[FileMetadata]:
 
 
 def _get_indexed_source_ids(client) -> set[str]:
-    """Query Zilliz for all indexed Dropbox PDF source_ids (standalone only)."""
+    """Query Zilliz for all indexed Dropbox PDF source_ids."""
     indexed: set[str] = set()
     try:
         results = client.query(
@@ -108,17 +122,126 @@ def _get_indexed_source_ids(client) -> set[str]:
     return indexed
 
 
+# ======================================================================
+# Worker process globals & initializer
+# ======================================================================
+
+_w_dbx: Dropbox | None = None
+_w_chunker: TextChunker | None = None
+_w_indexer: Indexer | None = None
+
+
+def _init_worker(dpi: int) -> None:
+    """Called once per worker process to set up shared resources."""
+    global _w_dbx, _w_chunker, _w_indexer
+
+    # Override DPI before OCR engine is lazily loaded
+    settings.ocr_dpi = dpi
+
+    _w_dbx = _get_dropbox_client()
+    _w_chunker = TextChunker()
+    _w_indexer = Indexer()
+
+
+def _process_one(entry_tuple: tuple) -> dict:
+    """Process a single PDF file. Runs inside a worker process.
+
+    Args:
+        entry_tuple: (entry_id, entry_name, path_display, size, server_modified_iso)
+
+    Returns:
+        dict with keys: status ('indexed', 'empty', 'error'), name, chars, chunks
+    """
+    entry_id, entry_name, path_display, size, server_modified_iso = entry_tuple
+
+    result = {
+        "status": "error",
+        "name": entry_name,
+        "path": path_display,
+        "chars": 0,
+        "chunks": 0,
+    }
+
+    ext = Path(entry_name).suffix.lower()
+    tmp_path: str | None = None
+
+    try:
+        # Download
+        tmp_fd, tmp_path = tempfile.mkstemp(suffix=ext)
+        os.close(tmp_fd)
+        _w_dbx.files_download_to_file(tmp_path, entry_id)
+
+        # Extract text (with OCR fallback)
+        text = extract_text(Path(tmp_path), file_extension=ext)
+
+        if not text.strip():
+            result["status"] = "empty"
+            return result
+
+        # Chunk and index
+        folder_path = str(Path(path_display).parent)
+        meta = DocumentMetadata(
+            source_type="dropbox",
+            source_id=entry_id,
+            created_date=server_modified_iso,
+            filename=entry_name,
+            folder_path=folder_path,
+            file_type=ext.lstrip("."),
+        )
+        chunks = _w_chunker.split(text)
+        inserted = _w_indexer.index_document(chunks, meta)
+
+        if inserted > 0:
+            result["status"] = "indexed"
+            result["chars"] = len(text)
+            result["chunks"] = inserted
+        else:
+            result["status"] = "error"
+
+    except Exception as exc:
+        logger.error("Worker error for %s: %s", path_display, exc)
+        result["status"] = "error"
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+    return result
+
+
+# ======================================================================
+# Main
+# ======================================================================
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Re-process skipped scanned PDFs with OCR")
-    parser.add_argument("--dry-run", action="store_true", help="List skipped PDFs without processing")
-    parser.add_argument("--limit", type=int, default=0, help="Max files to process (0 = all)")
-    parser.add_argument("--offset", type=int, default=0, help="Skip first N files")
+    parser = argparse.ArgumentParser(
+        description="Re-process skipped scanned PDFs with OCR (parallel)"
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="List skipped PDFs without processing"
+    )
+    parser.add_argument(
+        "--limit", type=int, default=0, help="Max files to process (0 = all)"
+    )
+    parser.add_argument(
+        "--offset", type=int, default=0, help="Skip first N files"
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=max(1, mp.cpu_count() // 2),
+        help="Number of parallel workers (default: half of CPU cores)",
+    )
+    parser.add_argument(
+        "--dpi",
+        type=int,
+        default=settings.ocr_dpi,
+        help=f"OCR rendering DPI (default: {settings.ocr_dpi})",
+    )
     args = parser.parse_args()
 
     dbx = _get_dropbox_client()
     client = get_client()
-    chunker = TextChunker()
-    indexer = Indexer()
 
     # 1. List all PDFs in Dropbox
     all_pdfs = _list_all_pdfs(dbx, settings.dropbox_folder_path)
@@ -132,7 +255,8 @@ def main() -> None:
 
     logger.info(
         "Skipped (unindexed) PDFs: %d / %d total",
-        len(skipped), len(all_pdfs),
+        len(skipped),
+        len(all_pdfs),
     )
 
     if args.dry_run:
@@ -145,98 +269,79 @@ def main() -> None:
         return
 
     # Apply offset/limit
-    target = skipped[args.offset:]
+    target = skipped[args.offset :]
     if args.limit > 0:
-        target = target[:args.limit]
+        target = target[: args.limit]
 
+    total = len(target)
     logger.info(
-        "Processing %d files (offset=%d, limit=%s)",
-        len(target), args.offset, args.limit or "all",
+        "Processing %d files (offset=%d, limit=%s, workers=%d, dpi=%d)",
+        total,
+        args.offset,
+        args.limit or "all",
+        args.workers,
+        args.dpi,
     )
 
-    stats = {"processed": 0, "ocr_success": 0, "still_empty": 0, "errors": 0}
-    start_time = time.monotonic()
-
-    for i, entry in enumerate(target):
-        file_num = args.offset + i + 1
-        logger.info(
-            "[%d/%d] Processing: %s (%s bytes)",
-            file_num, args.offset + len(target),
-            entry.path_display, f"{entry.size:,}",
+    # Prepare serializable tuples for workers
+    work_items: list[tuple] = []
+    for entry in target:
+        mod_iso = (
+            entry.server_modified.isoformat()
+            if entry.server_modified
+            else datetime.now(timezone.utc).isoformat()
+        )
+        work_items.append(
+            (entry.id, entry.name, entry.path_display, entry.size, mod_iso)
         )
 
-        ext = Path(entry.name).suffix.lower()
-        tmp_path: str | None = None
+    stats = {"indexed": 0, "empty": 0, "errors": 0}
+    start_time = time.monotonic()
 
-        try:
-            # Download
-            tmp_fd, tmp_path = tempfile.mkstemp(suffix=ext)
-            os.close(tmp_fd)
-            dbx.files_download_to_file(tmp_path, entry.id)
+    # Process with multiprocessing pool
+    with mp.Pool(
+        processes=args.workers,
+        initializer=_init_worker,
+        initargs=(args.dpi,),
+    ) as pool:
+        for i, result in enumerate(
+            pool.imap_unordered(_process_one, work_items), start=1
+        ):
+            status = result["status"]
+            stats[status if status in stats else "errors"] += 1
 
-            # Extract text (with OCR fallback)
-            text = extract_text(Path(tmp_path), file_extension=ext)
-
-            if not text.strip():
-                logger.warning("  Still no text after OCR: %s", entry.path_display)
-                stats["still_empty"] += 1
-                continue
-
-            # Chunk and index
-            created_date = (
-                entry.server_modified.isoformat()
-                if entry.server_modified
-                else datetime.now(timezone.utc).isoformat()
-            )
-            folder_path = str(Path(entry.path_display).parent)
-
-            meta = DocumentMetadata(
-                source_type="dropbox",
-                source_id=entry.id,
-                created_date=created_date,
-                filename=entry.name,
-                folder_path=folder_path,
-                file_type=ext.lstrip("."),
-            )
-            chunks = chunker.split(text)
-            inserted = indexer.index_document(chunks, meta)
-
-            if inserted > 0:
-                stats["ocr_success"] += 1
+            if status == "indexed":
                 logger.info(
-                    "  Indexed %d chunks (%d chars) for %s",
-                    inserted, len(text), entry.name,
+                    "[%d/%d] Indexed %d chunks (%d chars): %s",
+                    i, total,
+                    result["chunks"],
+                    result["chars"],
+                    result["name"],
                 )
+            elif status == "empty":
+                logger.info("[%d/%d] No text (even with OCR): %s", i, total, result["name"])
             else:
-                stats["errors"] += 1
+                logger.warning("[%d/%d] Error: %s", i, total, result["path"])
 
-        except Exception:
-            logger.exception("  Error processing: %s", entry.path_display)
-            stats["errors"] += 1
-        finally:
-            if tmp_path and os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-
-        stats["processed"] += 1
-
-        # Progress report every 50 files
-        if stats["processed"] % 50 == 0:
-            elapsed = time.monotonic() - start_time
-            rate = stats["processed"] / elapsed if elapsed > 0 else 0
-            remaining = (len(target) - stats["processed"]) / rate if rate > 0 else 0
-            logger.info(
-                "  Progress: %d/%d (%.1f files/min, ~%.0f min remaining)",
-                stats["processed"], len(target),
-                rate * 60, remaining / 60,
-            )
+            # Progress every 50 files
+            if i % 50 == 0:
+                elapsed = time.monotonic() - start_time
+                rate = i / elapsed
+                remaining = (total - i) / rate if rate > 0 else 0
+                logger.info(
+                    "  Progress: %d/%d (%.1f files/min, ~%.0f min remaining)",
+                    i, total, rate * 60, remaining / 60,
+                )
 
     elapsed = time.monotonic() - start_time
     logger.info("=" * 60)
     logger.info("OCR re-processing complete in %.1f min", elapsed / 60)
-    logger.info("  Processed : %d", stats["processed"])
-    logger.info("  OCR success: %d", stats["ocr_success"])
-    logger.info("  Still empty: %d", stats["still_empty"])
+    logger.info("  Indexed   : %d", stats["indexed"])
+    logger.info("  Still empty: %d", stats["empty"])
     logger.info("  Errors     : %d", stats["errors"])
+    logger.info("  Total      : %d files in %.1f min", total, elapsed / 60)
+    if total > 0:
+        logger.info("  Avg speed  : %.1f files/min", total / (elapsed / 60))
     logger.info("=" * 60)
 
 
