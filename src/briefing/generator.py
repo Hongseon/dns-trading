@@ -1,8 +1,9 @@
 """Briefing generator for daily, weekly, and monthly summaries.
 
-Queries Zilliz Cloud for recent documents within the target date range,
-searches for schedule-related keywords, deduplicates results, and
-uses the Gemini LLM to produce a structured Korean briefing.
+Queries Zilliz Cloud for recent Dropbox file changes and email activity,
+searches for schedule/task-related keywords, and uses the Gemini LLM to
+produce a structured Korean briefing with separate sections for files,
+emails, and upcoming tasks.
 """
 
 from __future__ import annotations
@@ -27,37 +28,138 @@ _TYPE_LABELS: dict[str, str] = {
     "monthly": "월간",
 }
 
-_SCHEDULE_KEYWORDS: list[str] = [
+_TASK_KEYWORDS: list[str] = [
     "일정",
     "마감",
     "deadline",
     "회의",
     "미팅",
     "예정",
+    "납기",
+    "납품",
+    "검수",
+    "계약",
+    "입찰",
+    "제출",
+    "보고",
+    "완료 예정",
+    "진행 중",
+    "pending",
 ]
 
 _KST = timezone(timedelta(hours=9))
 
-_BRIEFING_PROMPT_TEMPLATE = """\
-다음은 {start}~{end} 기간의 업무 문서/이메일 목록입니다.
+# ------------------------------------------------------------------
+# Prompt templates (daily vs weekly/monthly)
+# ------------------------------------------------------------------
 
-{documents}
+_DAILY_PROMPT = """\
+다음은 최근 업무 활동 데이터입니다.
 
-위 내용을 바탕으로 다음 형식의 업무 브리핑을 작성하세요:
+== 최근 변동된 파일 ({file_count}건) ==
+{files_section}
 
-📋 {type_label} 브리핑 ({date})
+== 최근 수신/발신 이메일 ({email_count}건) ==
+{emails_section}
 
-[지난 기간 업무 요약]
-• 주요 활동 3~5개
+== 업무/일정 관련 문서 ({task_count}건) ==
+{tasks_section}
 
-[향후 할 일]
+위 데이터를 분석하여 다음 형식으로 일간 업무 브리핑을 작성하세요:
+
+📋 일간 업무 브리핑 ({date})
+
+[파일 변동 사항]
+• 새로 추가/수정된 파일과 주요 내용 요약
+
+[이메일 요약]
+• 주요 수신/발신 메일의 핵심 내용
+
+[오늘의 할 일]
 ⚠️ 마감 임박 항목
 • 예정된 업무 목록
 
-[기타 참고사항]
-• 중요 공지나 변경 사항
+[참고사항]
+• 기타 중요 사항
 
-800자 이내로 작성하세요."""
+규칙:
+- 데이터가 없는 섹션은 "해당 없음"으로 표시
+- 900자 이내로 작성
+- 한국어로 작성"""
+
+_WEEKLY_PROMPT = """\
+다음은 지난 한 주간의 업무 활동 데이터입니다.
+
+== 이번 주 변동된 파일 ({file_count}건) ==
+{files_section}
+
+== 이번 주 수신/발신 이메일 ({email_count}건) ==
+{emails_section}
+
+== 업무/일정 관련 문서 ({task_count}건) ==
+{tasks_section}
+
+위 데이터를 분석하여 다음 형식으로 주간 업무 브리핑을 작성하세요:
+
+📋 주간 업무 브리핑 ({date})
+
+[이번 주 주요 활동]
+• 주요 파일 작업 및 메일 활동 요약 (3~5개)
+
+[프로젝트별 진행 상황]
+• 프로젝트/계약 단위로 진행 상황 정리
+
+[다음 주 예정 업무]
+⚠️ 마감 임박 항목
+• 예정된 업무 목록
+
+[참고사항]
+• 기타 중요 사항
+
+규칙:
+- 데이터가 없는 섹션은 "해당 없음"으로 표시
+- 900자 이내로 작성
+- 한국어로 작성"""
+
+_MONTHLY_PROMPT = """\
+다음은 지난 한 달간의 업무 활동 데이터입니다.
+
+== 이번 달 변동된 파일 ({file_count}건) ==
+{files_section}
+
+== 이번 달 수신/발신 이메일 ({email_count}건) ==
+{emails_section}
+
+== 업무/일정 관련 문서 ({task_count}건) ==
+{tasks_section}
+
+위 데이터를 분석하여 다음 형식으로 월간 업무 브리핑을 작성하세요:
+
+📋 월간 업무 브리핑 ({date})
+
+[이번 달 주요 성과]
+• 완료된 주요 업무 (3~5개)
+
+[프로젝트별 진행 현황]
+• 프로젝트/계약 단위 현황 정리
+
+[다음 달 주요 일정]
+⚠️ 마감 임박 항목
+• 예정된 업무 및 마감 일정
+
+[참고사항]
+• 기타 중요 사항
+
+규칙:
+- 데이터가 없는 섹션은 "해당 없음"으로 표시
+- 900자 이내로 작성
+- 한국어로 작성"""
+
+_PROMPTS: dict[str, str] = {
+    "daily": _DAILY_PROMPT,
+    "weekly": _WEEKLY_PROMPT,
+    "monthly": _MONTHLY_PROMPT,
+}
 
 
 # ------------------------------------------------------------------
@@ -88,8 +190,7 @@ class BriefingGenerator:
         Returns
         -------
         str
-            The generated briefing text, or a notice when no documents
-            were found for the period.
+            The generated briefing text.
         """
         if briefing_type not in _TYPE_LABELS:
             raise ValueError(
@@ -105,47 +206,42 @@ class BriefingGenerator:
             end.isoformat(),
         )
 
-        # 1. Fetch documents within the date range
-        date_docs = self._get_documents_by_date(start, end)
+        # Collect data in three categories
+        data = self._collect_briefing_data(briefing_type, start, end)
 
-        # 2. Search for schedule-related documents via vector similarity
-        schedule_docs = self._search_schedule_keywords(start)
-
-        # 3. Merge and deduplicate
-        merged = self._deduplicate(date_docs + schedule_docs)
-
-        if not merged:
+        has_data = (
+            data["recent_files"]
+            or data["recent_emails"]
+            or data["upcoming_tasks"]
+        )
+        if not has_data:
             msg = "해당 기간에 새로운 문서/메일이 없습니다."
             logger.info(msg)
             self._save_briefing(briefing_type, msg)
             return msg
 
-        # 4. Limit to avoid exceeding LLM context window
-        merged = merged[:20]
-
-        # 5. Build the LLM prompt
-        type_label = _TYPE_LABELS[briefing_type]
+        # Build the LLM prompt
         now_kst = datetime.now(_KST)
-        documents_text = self._format_documents(merged)
+        prompt = self._build_prompt(briefing_type, data, now_kst)
 
-        prompt = _BRIEFING_PROMPT_TEMPLATE.format(
-            start=start.strftime("%Y-%m-%d"),
-            end=end.strftime("%Y-%m-%d"),
-            documents=documents_text,
-            type_label=type_label,
-            date=now_kst.strftime("%Y-%m-%d %a"),
+        # Call the LLM with briefing-specific settings
+        briefing_system = (
+            "당신은 업무 브리핑을 작성하는 AI 어시스턴트입니다. "
+            "제공된 파일 변동 사항과 이메일 데이터를 분석하여 "
+            "구조화된 한국어 업무 브리핑을 작성하세요. "
+            "모든 섹션을 빠짐없이 작성하고, 900자 이내로 완성하세요."
         )
-
-        # 6. Call the LLM
         try:
-            content = await self.generator._call_with_fallback(prompt)
+            content = await self.generator._call_with_fallback(
+                prompt,
+                system_instruction=briefing_system,
+                max_output_tokens=2048,
+            )
         except Exception:
             logger.exception("Failed to generate briefing via LLM")
-            content = (
-                "브리핑 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
-            )
+            content = "브리핑 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
 
-        # 7. Persist
+        # Persist
         self._save_briefing(briefing_type, content)
 
         logger.info(
@@ -154,17 +250,230 @@ class BriefingGenerator:
         return content
 
     # ------------------------------------------------------------------
+    # Data collection
+    # ------------------------------------------------------------------
+
+    def _collect_briefing_data(
+        self,
+        briefing_type: str,
+        start: datetime,
+        end: datetime,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Collect documents, emails, and task-related items for the briefing."""
+        start_iso = start.isoformat()
+        end_iso = end.isoformat()
+
+        file_limit = 15 if briefing_type == "daily" else 30
+        email_limit = 15 if briefing_type == "daily" else 30
+
+        # 1. Recently changed Dropbox files (by updated_date = indexing time)
+        recent_files = self.retriever.search_by_date_range(
+            date_field="updated_date",
+            start_date=start_iso,
+            end_date=end_iso,
+            source_type="dropbox",
+            limit=file_limit,
+        )
+
+        # 2. Recent emails (by created_date = email date)
+        recent_emails = self.retriever.search_by_date_range(
+            date_field="created_date",
+            start_date=start_iso,
+            end_date=end_iso,
+            source_type="email",
+            limit=email_limit,
+        )
+
+        # 3. Upcoming tasks / schedule-related (vector search)
+        upcoming_tasks = self._search_upcoming_tasks(start_iso)
+
+        return {
+            "recent_files": recent_files,
+            "recent_emails": recent_emails,
+            "upcoming_tasks": upcoming_tasks,
+        }
+
+    def _search_upcoming_tasks(
+        self,
+        after_date: str,
+    ) -> list[dict[str, Any]]:
+        """Search for schedule/task-related documents via vector similarity.
+
+        Uses an expanded set of keywords and deduplicates results.
+        """
+        all_results: list[dict[str, Any]] = []
+
+        for keyword in _TASK_KEYWORDS:
+            try:
+                results = self.retriever.search(
+                    query=keyword,
+                    after_date=after_date,
+                    top_k=3,
+                )
+                all_results.extend(results)
+            except Exception:
+                logger.warning(
+                    "Task keyword search failed for '%s'",
+                    keyword,
+                    exc_info=True,
+                )
+
+        # Deduplicate
+        unique = self._deduplicate(all_results)
+
+        logger.info(
+            "Task keyword search: %d raw -> %d unique results",
+            len(all_results),
+            len(unique),
+        )
+        return unique[:15]
+
+    # ------------------------------------------------------------------
+    # Prompt building
+    # ------------------------------------------------------------------
+
+    def _build_prompt(
+        self,
+        briefing_type: str,
+        data: dict[str, list[dict[str, Any]]],
+        now_kst: datetime,
+    ) -> str:
+        """Build the LLM prompt with separated file/email/task sections."""
+        files_section = self._format_files(data["recent_files"])
+        emails_section = self._format_emails(data["recent_emails"])
+        tasks_section = self._format_tasks(data["upcoming_tasks"])
+
+        template = _PROMPTS[briefing_type]
+        return template.format(
+            file_count=len(data["recent_files"]),
+            files_section=files_section,
+            email_count=len(data["recent_emails"]),
+            emails_section=emails_section,
+            task_count=len(data["upcoming_tasks"]),
+            tasks_section=tasks_section,
+            date=now_kst.strftime("%Y-%m-%d %a"),
+        )
+
+    # ------------------------------------------------------------------
+    # Formatting helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _format_files(docs: list[dict[str, Any]]) -> str:
+        """Format Dropbox files as 'filename (folder) - date'."""
+        if not docs:
+            return "(변동된 파일 없음)"
+
+        parts: list[str] = []
+        for idx, doc in enumerate(docs, start=1):
+            filename = doc.get("filename") or "알 수 없는 파일"
+            folder = doc.get("folder_path") or ""
+            if folder:
+                folder = folder.strip("/")
+            created = str(doc.get("created_date", ""))[:10]
+            content = (doc.get("content") or "").strip()
+            if len(content) > 150:
+                content = content[:150] + "..."
+
+            line = f"{idx}. [{filename}]"
+            if folder:
+                line += f" ({folder})"
+            if created:
+                line += f" - {created}"
+            if content:
+                line += f"\n   {content}"
+            parts.append(line)
+
+        return "\n\n".join(parts)
+
+    @staticmethod
+    def _format_emails(docs: list[dict[str, Any]]) -> str:
+        """Format emails as '[subject] from sender - date'."""
+        if not docs:
+            return "(수신/발신 메일 없음)"
+
+        parts: list[str] = []
+        for idx, doc in enumerate(docs, start=1):
+            subject = doc.get("email_subject") or "제목 없음"
+            sender = doc.get("email_from") or ""
+            email_date = str(doc.get("email_date") or doc.get("created_date") or "")[:10]
+            content = (doc.get("content") or "").strip()
+            if len(content) > 150:
+                content = content[:150] + "..."
+
+            line = f"{idx}. [{subject}]"
+            if sender:
+                line += f" 발신: {sender}"
+            if email_date:
+                line += f" ({email_date})"
+            if content:
+                line += f"\n   {content}"
+            parts.append(line)
+
+        return "\n\n".join(parts)
+
+    @staticmethod
+    def _format_tasks(docs: list[dict[str, Any]]) -> str:
+        """Format task/schedule-related documents with content excerpts."""
+        if not docs:
+            return "(관련 문서 없음)"
+
+        parts: list[str] = []
+        for idx, doc in enumerate(docs, start=1):
+            source_type = doc.get("source_type", "")
+            content = (doc.get("content") or "").strip()
+            if len(content) > 200:
+                content = content[:200] + "..."
+
+            if source_type == "dropbox":
+                label = doc.get("filename") or "파일"
+                source_label = f"[파일: {label}]"
+            elif source_type == "email":
+                subject = doc.get("email_subject") or "제목 없음"
+                sender = doc.get("email_from") or ""
+                source_label = f"[이메일: {subject} - {sender}]"
+            else:
+                source_label = f"[{source_type}]"
+
+            created = str(doc.get("created_date", ""))[:10]
+            date_part = f" ({created})" if created else ""
+
+            parts.append(f"{idx}. {source_label}{date_part}\n   {content}")
+
+        return "\n\n".join(parts)
+
+    # ------------------------------------------------------------------
+    # Deduplication
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _deduplicate(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Remove duplicate documents based on ``id`` or content prefix."""
+        seen: set[str] = set()
+        unique: list[dict[str, Any]] = []
+
+        for doc in docs:
+            doc_id = doc.get("id")
+            if doc_id is not None:
+                key = f"id:{doc_id}"
+            else:
+                content = doc.get("content", "")
+                key = f"content:{content[:50]}"
+
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(doc)
+
+        return unique
+
+    # ------------------------------------------------------------------
     # Date range
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _get_date_range(
-        briefing_type: str,
-    ) -> tuple[datetime, datetime]:
-        """Return ``(start, end)`` datetimes for the given briefing type.
-
-        All datetimes are in KST (UTC+9).
-        """
+    def _get_date_range(briefing_type: str) -> tuple[datetime, datetime]:
+        """Return ``(start, end)`` datetimes in KST for the given type."""
         now = datetime.now(_KST)
 
         if briefing_type == "daily":
@@ -179,149 +488,6 @@ class BriefingGenerator:
         return start, now
 
     # ------------------------------------------------------------------
-    # Document fetching
-    # ------------------------------------------------------------------
-
-    def _get_documents_by_date(
-        self,
-        start: datetime,
-        end: datetime,
-    ) -> list[dict[str, Any]]:
-        """Query the documents collection filtered by ``created_date`` range.
-
-        Returns up to 50 documents ordered by recency.
-        """
-        try:
-            start_iso = start.isoformat()
-            end_iso = end.isoformat()
-            results = self.client.query(
-                collection_name="documents",
-                filter=f'created_date >= "{start_iso}" and created_date <= "{end_iso}"',
-                output_fields=[
-                    "source_type", "content", "filename",
-                    "email_subject", "email_from", "created_date",
-                ],
-                limit=50,
-            )
-            # Sort by created_date descending (Milvus query doesn't support ORDER BY)
-            results.sort(
-                key=lambda x: x.get("created_date", ""),
-                reverse=True,
-            )
-            logger.info(
-                "Fetched %d documents by date range (%s ~ %s)",
-                len(results),
-                start.strftime("%Y-%m-%d"),
-                end.strftime("%Y-%m-%d"),
-            )
-            return results
-        except Exception:
-            logger.exception("Failed to fetch documents by date range")
-            return []
-
-    def _search_schedule_keywords(
-        self,
-        after_date: datetime,
-    ) -> list[dict[str, Any]]:
-        """Search for schedule-related documents via vector similarity.
-
-        Queries each keyword in :data:`_SCHEDULE_KEYWORDS` and collects
-        up to 3 results per keyword, filtered to documents after
-        *after_date*.
-        """
-        all_results: list[dict[str, Any]] = []
-        after_iso = after_date.isoformat()
-
-        for keyword in _SCHEDULE_KEYWORDS:
-            try:
-                results = self.retriever.search(
-                    query=keyword,
-                    after_date=after_iso,
-                    top_k=3,
-                )
-                all_results.extend(results)
-            except Exception:
-                logger.warning(
-                    "Schedule keyword search failed for '%s'",
-                    keyword,
-                    exc_info=True,
-                )
-
-        logger.info(
-            "Schedule keyword search returned %d total results",
-            len(all_results),
-        )
-        return all_results
-
-    # ------------------------------------------------------------------
-    # Deduplication & formatting
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _deduplicate(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Remove duplicate documents based on ``id`` or content prefix.
-
-        When an ``id`` field is present it is used as the dedup key;
-        otherwise the first 50 characters of ``content`` are used as a
-        fallback fingerprint.
-        """
-        seen: set[str] = set()
-        unique: list[dict[str, Any]] = []
-
-        for doc in docs:
-            # Prefer id, fall back to content prefix
-            doc_id = doc.get("id")
-            if doc_id is not None:
-                key = f"id:{doc_id}"
-            else:
-                content = doc.get("content", "")
-                key = f"content:{content[:50]}"
-
-            if key in seen:
-                continue
-            seen.add(key)
-            unique.append(doc)
-
-        logger.debug(
-            "Deduplicated %d -> %d documents", len(docs), len(unique)
-        )
-        return unique
-
-    @staticmethod
-    def _format_documents(docs: list[dict[str, Any]]) -> str:
-        """Format a list of document dicts into numbered text for the prompt."""
-        if not docs:
-            return "(문서 없음)"
-
-        parts: list[str] = []
-        for idx, doc in enumerate(docs, start=1):
-            source_type = doc.get("source_type", "")
-            content = (doc.get("content") or "").strip()
-
-            if source_type == "dropbox":
-                label = doc.get("filename") or "파일"
-                source_label = f"[파일: {label}]"
-            elif source_type == "email":
-                subject = doc.get("email_subject") or "제목 없음"
-                sender = doc.get("email_from") or ""
-                source_label = f"[이메일: {subject} - {sender}]"
-            else:
-                source_label = f"[{source_type}]"
-
-            created = doc.get("created_date", "")
-            date_str = ""
-            if created:
-                date_str = f" ({str(created)[:10]})"
-
-            # Truncate overly long content to keep prompt manageable
-            if len(content) > 300:
-                content = content[:300] + "..."
-
-            parts.append(f"{idx}. {source_label}{date_str}\n{content}")
-
-        return "\n\n".join(parts)
-
-    # ------------------------------------------------------------------
     # Persistence
     # ------------------------------------------------------------------
 
@@ -333,7 +499,7 @@ class BriefingGenerator:
                 collection_name="briefings",
                 data=[{
                     "briefing_type": briefing_type,
-                    "content": content[:10000],  # VARCHAR limit
+                    "content": content[:10000],
                     "generated_at": now,
                     "sent": False,
                     "_dummy_vec": [0.0, 0.0],

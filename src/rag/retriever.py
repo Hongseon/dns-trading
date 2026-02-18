@@ -115,6 +115,84 @@ class Retriever:
         return results
 
     # ------------------------------------------------------------------
+    # Date-range query (no vector search)
+    # ------------------------------------------------------------------
+
+    def search_by_date_range(
+        self,
+        date_field: str,
+        start_date: str,
+        end_date: str,
+        source_type: str | None = None,
+        limit: int = 30,
+        output_fields: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Query documents by date range without vector similarity.
+
+        Parameters
+        ----------
+        date_field:
+            Field to filter on -- ``"created_date"`` or ``"updated_date"``.
+        start_date:
+            ISO-8601 start date (inclusive).
+        end_date:
+            ISO-8601 end date (inclusive).
+        source_type:
+            Optional ``"dropbox"`` or ``"email"`` filter.
+        limit:
+            Maximum results (default 30).
+        output_fields:
+            Fields to return.  Defaults to :data:`_OUTPUT_FIELDS` plus
+            ``updated_date`` and ``email_date``.
+
+        Returns
+        -------
+        list[dict]
+            Documents matching the date range, sorted by *date_field*
+            descending.  Only ``chunk_index == 0`` rows are returned so
+            each document appears at most once.
+        """
+        if output_fields is None:
+            output_fields = _OUTPUT_FIELDS + ["updated_date", "email_date", "folder_path"]
+
+        parts = [
+            f'{date_field} >= "{start_date}"',
+            f'{date_field} <= "{end_date}"',
+            "chunk_index == 0",
+        ]
+        if source_type:
+            parts.append(f'source_type == "{source_type}"')
+
+        filter_expr = " and ".join(parts)
+
+        try:
+            results = self.client.query(
+                collection_name="documents",
+                filter=filter_expr,
+                output_fields=output_fields,
+                limit=limit,
+            )
+            results.sort(
+                key=lambda x: x.get(date_field, ""),
+                reverse=True,
+            )
+            logger.info(
+                "Date-range query (%s %s~%s, type=%s): %d results",
+                date_field,
+                start_date[:10],
+                end_date[:10],
+                source_type or "all",
+                len(results),
+            )
+            return results
+        except Exception:
+            logger.exception(
+                "Date-range query failed (%s %s~%s)",
+                date_field, start_date[:10], end_date[:10],
+            )
+            return []
+
+    # ------------------------------------------------------------------
     # Context formatting
     # ------------------------------------------------------------------
 

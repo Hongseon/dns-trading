@@ -116,10 +116,28 @@ class Generator:
     # LLM call helpers
     # ------------------------------------------------------------------
 
-    async def _call_with_fallback(self, user_prompt: str) -> str:
-        """Try the primary model; on failure, retry with the fallback."""
+    async def _call_with_fallback(
+        self,
+        user_prompt: str,
+        system_instruction: str | None = None,
+        max_output_tokens: int = 1024,
+    ) -> str:
+        """Try the primary model; on failure, retry with the fallback.
+
+        Parameters
+        ----------
+        user_prompt:
+            The prompt to send.
+        system_instruction:
+            Optional override for the system prompt.  Defaults to
+            :data:`SYSTEM_PROMPT` when ``None``.
+        max_output_tokens:
+            Maximum output tokens (default 1024).
+        """
         try:
-            return await self._call_llm(self.model, user_prompt)
+            return await self._call_llm(
+                self.model, user_prompt, system_instruction, max_output_tokens,
+            )
         except Exception:
             logger.warning(
                 "Primary model %s failed, falling back to %s",
@@ -129,7 +147,9 @@ class Generator:
             )
 
         try:
-            return await self._call_llm(self.fallback_model, user_prompt)
+            return await self._call_llm(
+                self.fallback_model, user_prompt, system_instruction, max_output_tokens,
+            )
         except Exception:
             logger.exception(
                 "Fallback model %s also failed", self.fallback_model
@@ -139,7 +159,13 @@ class Generator:
                 "잠시 후 다시 시도해 주세요."
             )
 
-    async def _call_llm(self, model: str, user_prompt: str) -> str:
+    async def _call_llm(
+        self,
+        model: str,
+        user_prompt: str,
+        system_instruction: str | None = None,
+        max_output_tokens: int = 1024,
+    ) -> str:
         """Call a single Gemini model and return the text response.
 
         Parameters
@@ -148,6 +174,10 @@ class Generator:
             The model identifier (e.g. ``"gemini-3-flash-preview"``).
         user_prompt:
             The fully assembled user prompt including context and query.
+        system_instruction:
+            Optional override for the system prompt.
+        max_output_tokens:
+            Maximum output tokens.
 
         Returns
         -------
@@ -161,9 +191,9 @@ class Generator:
             :meth:`_call_with_fallback` can handle it.
         """
         config = genai_types.GenerateContentConfig(
-            system_instruction=SYSTEM_PROMPT,
+            system_instruction=system_instruction or SYSTEM_PROMPT,
             temperature=0.3,
-            max_output_tokens=1024,
+            max_output_tokens=max_output_tokens,
         )
 
         logger.debug("Calling model=%s, prompt length=%d", model, len(user_prompt))
