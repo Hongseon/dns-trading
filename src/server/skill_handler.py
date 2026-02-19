@@ -89,17 +89,10 @@ async def skill_query(request: Request):
         answer = await asyncio.wait_for(chain.quick_run(utterance), timeout=4.5)
         return make_kakao_response(answer)
     except asyncio.TimeoutError:
-        # LLM timed out -- fall back to search-only results
-        logger.warning("quick_run timed out, falling back to search-only: %s", utterance[:60])
-        try:
-            snippet = await asyncio.wait_for(
-                asyncio.to_thread(chain.search_only, utterance), timeout=3.0
-            )
-            return make_kakao_response(snippet)
-        except Exception:
-            return make_kakao_response(
-                "응답 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요."
-            )
+        logger.warning("quick_run timed out for: %s", utterance[:60])
+        return make_kakao_response(
+            "응답 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요."
+        )
     except Exception:
         logger.exception("skill/query direct mode failed")
         return make_kakao_response(
