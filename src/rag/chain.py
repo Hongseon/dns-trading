@@ -117,6 +117,29 @@ class RAGChain:
 # Module-level singleton
 # ======================================================================
 
+    def search_only(self, query: str, top_k: int = 3) -> str:
+        """Return formatted search results without LLM generation.
+
+        Used as a fast fallback when the full RAG pipeline times out.
+        """
+        results = self.retriever.search(query, top_k=top_k)
+        if not results:
+            return "관련 문서를 찾을 수 없습니다."
+
+        parts: list[str] = []
+        for idx, doc in enumerate(results, start=1):
+            src_type = doc.get("source_type", "")
+            if src_type == "dropbox":
+                label = doc.get("filename") or "파일"
+            else:
+                label = doc.get("email_subject") or "이메일"
+            content = (doc.get("content") or "")[:150].strip()
+            parts.append(f"{idx}. [{label}]\n{content}")
+
+        header = f"검색 결과 ({len(results)}건):\n\n"
+        return header + "\n\n".join(parts)
+
+
 _chain: RAGChain | None = None
 
 
