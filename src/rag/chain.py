@@ -96,11 +96,21 @@ class RAGChain:
     async def quick_run(self, query: str) -> str:
         """Quick RAG for the non-callback code path.
 
-        Uses fewer retrieved chunks (``top_k=3``) to reduce latency so
-        the response has a better chance of fitting within the 5-second
-        KakaoTalk skill timeout.
+        Uses fewer retrieved chunks (``top_k=2``) and a shorter max token
+        limit to fit within the 5-second KakaoTalk skill timeout.
         """
-        return await self.run(query, top_k=3)
+        # Step 1 -- Retrieve with minimal chunks
+        results, context, sources = await asyncio.to_thread(
+            self.retriever.search_and_prepare, query, None, None, 2
+        )
+        if not results:
+            return "관련 문서를 찾을 수 없습니다. 다른 키워드로 검색해 보세요."
+
+        # Step 2 -- Generate with shorter output
+        answer = await self.generator.generate_quick(query, context, sources)
+
+        # Step 3 -- Truncate
+        return _truncate(answer, _KAKAO_MAX_CHARS)
 
 
 # ======================================================================

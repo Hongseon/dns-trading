@@ -221,6 +221,29 @@ class Generator:
     # Source citation helpers
     # ------------------------------------------------------------------
 
+    async def generate_quick(
+        self,
+        query: str,
+        context: str,
+        sources: list[str],
+    ) -> str:
+        """Generate a concise RAG answer for the non-callback (5s) path."""
+        user_prompt = _USER_PROMPT_TEMPLATE.format(context=context, query=query)
+
+        try:
+            answer = await self._call_llm(
+                self.model, user_prompt, max_output_tokens=512,
+            )
+        except Exception:
+            try:
+                answer = await self._call_llm(
+                    self.fallback_model, user_prompt, max_output_tokens=512,
+                )
+            except Exception:
+                return "현재 답변을 생성할 수 없습니다. 잠시 후 다시 시도해 주세요."
+
+        return self._ensure_sources(answer, sources)
+
     @staticmethod
     def _ensure_sources(answer: str, sources: list[str]) -> str:
         """Append source citations to *answer* if not already present.
