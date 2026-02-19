@@ -80,7 +80,72 @@ def _get_ocr_engine():
 
 
 def _extract_pdf_ocr(file_path: Path) -> str:
-    """Extract text from a scanned PDF by rendering pages to images and running OCR."""
+    """Extract text from a scanned PDF by rendering pages to images and running OCR.
+
+    On macOS, uses Apple Vision Framework (hardware-accelerated via Neural Engine)
+    for ~50x faster OCR. Falls back to PaddleOCR on other platforms.
+    """
+    import sys
+
+    if sys.platform == "darwin":
+        result = _extract_pdf_ocr_apple_vision(file_path)
+        if result:
+            return result
+        logger.warning("Apple Vision OCR returned empty for %s, trying PaddleOCR", file_path)
+
+    return _extract_pdf_ocr_paddle(file_path)
+
+
+def _extract_pdf_ocr_apple_vision(file_path: Path) -> str:
+    """Extract text using macOS Apple Vision Framework via ocrmac."""
+    import fitz  # PyMuPDF
+
+    dpi = settings.ocr_dpi
+    texts: list[str] = []
+    tmp_img: str | None = None
+
+    try:
+        from ocrmac import ocrmac as _ocrmac
+
+        with fitz.open(str(file_path)) as doc:
+            for page_idx, page in enumerate(doc):
+                pixmap = page.get_pixmap(dpi=dpi)
+                tmp_img = tempfile.mktemp(suffix=".png", prefix="ocr_page_")
+                pixmap.save(tmp_img)
+
+                result = _ocrmac.OCR(
+                    tmp_img,
+                    language_preference=["ko-KR", "en-US"],
+                    recognition_level="accurate",
+                ).recognize()
+
+                if os.path.exists(tmp_img):
+                    os.unlink(tmp_img)
+                    tmp_img = None
+
+                page_text = "\n".join(r[0] for r in result if r[0] and r[0].strip())
+                if page_text.strip():
+                    texts.append(page_text)
+
+        if texts:
+            logger.info(
+                "Apple Vision OCR extracted text from %d pages of %s",
+                len(texts), file_path.name,
+            )
+    except ImportError:
+        logger.warning("ocrmac not installed, cannot use Apple Vision OCR")
+        return ""
+    except Exception as exc:
+        logger.error("Apple Vision OCR failed for %s: %s", file_path, exc)
+    finally:
+        if tmp_img and os.path.exists(tmp_img):
+            os.unlink(tmp_img)
+
+    return "\n\n".join(texts)
+
+
+def _extract_pdf_ocr_paddle(file_path: Path) -> str:
+    """Extract text using PaddleOCR (CPU-based fallback)."""
     import fitz  # PyMuPDF
 
     ocr = _get_ocr_engine()
@@ -122,10 +187,10 @@ def _extract_pdf_ocr(file_path: Path) -> str:
 
         if texts:
             logger.info(
-                "OCR extracted text from %d pages of %s", len(texts), file_path.name
+                "PaddleOCR extracted text from %d pages of %s", len(texts), file_path.name
             )
     except Exception as exc:
-        logger.error("PDF OCR failed for %s: %s", file_path, exc)
+        logger.error("PaddleOCR failed for %s: %s", file_path, exc)
     finally:
         if tmp_img and os.path.exists(tmp_img):
             os.unlink(tmp_img)
