@@ -81,22 +81,38 @@ class DropboxSync:
         cursor = self._load_cursor()
 
         try:
+            needs_fresh_cursor = False
+
             if cursor:
                 logger.info("Resuming Dropbox sync with existing cursor")
                 try:
                     result: ListFolderResult = self._dbx.files_list_folder_continue(cursor)
                 except Exception:
                     logger.warning(
-                        "Cursor expired or invalid, re-establishing cursor"
+                        "Cursor expired or invalid, will re-establish"
                     )
-                    cursor = None
+                    needs_fresh_cursor = True
+                else:
+                    # If the cursor returns a large backlog (>200 entries with
+                    # more pages), it's likely stale from an incomplete initial
+                    # sync.  Re-establish instead of processing thousands of
+                    # already-indexed files.
+                    if len(result.entries) > 200 and result.has_more:
+                        logger.warning(
+                            "Stale cursor detected (%d entries, has_more=True). "
+                            "Re-establishing fresh cursor instead of re-processing.",
+                            len(result.entries),
+                        )
+                        needs_fresh_cursor = True
+            else:
+                needs_fresh_cursor = True
 
-            if not cursor:
-                # No cursor: scan through all entries WITHOUT processing to
-                # establish a cursor quickly.  Existing data was indexed by
-                # prior local runs; only future *changes* need processing.
+            if needs_fresh_cursor:
+                # Scan through all entries WITHOUT processing to establish a
+                # cursor quickly.  Existing data was indexed by prior runs;
+                # only future *changes* need processing.
                 logger.info(
-                    "Establishing initial cursor for folder: %s (skip processing)",
+                    "Establishing fresh cursor for folder: %s (skip processing)",
                     self._folder_path,
                 )
                 result = self._dbx.files_list_folder(
@@ -115,7 +131,7 @@ class DropboxSync:
                 )
                 return stats
 
-            # Incremental mode: process only changed entries
+            # Incremental mode: process only genuinely changed entries
             while True:
                 for entry in result.entries:
                     self._process_entry(entry, stats)
