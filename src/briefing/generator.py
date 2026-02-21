@@ -253,6 +253,11 @@ class BriefingGenerator:
             logger.exception("Failed to generate briefing via LLM")
             content = "브리핑 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
 
+        # Append source citations
+        sources = self._format_sources(data)
+        if sources:
+            content = content.rstrip() + "\n\n" + sources
+
         # Persist
         self._save_briefing(briefing_type, content)
 
@@ -402,6 +407,41 @@ class BriefingGenerator:
             parts.append(line)
 
         return "\n\n".join(parts)
+
+    # ------------------------------------------------------------------
+    # Source citations
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _format_sources(data: dict[str, list[dict[str, Any]]]) -> str:
+        """Build a compact source citation block from briefing data."""
+        seen: set[str] = set()
+        lines: list[str] = []
+
+        for doc in data.get("recent_files", []):
+            filename = doc.get("filename") or ""
+            folder = (doc.get("folder_path") or "").strip("/")
+            if not filename:
+                continue
+            label = f"{folder}/{filename}" if folder else filename
+            if label not in seen:
+                seen.add(label)
+                lines.append(f"- {label}")
+
+        for doc in data.get("received_emails", []) + data.get("sent_emails", []):
+            subject = doc.get("email_subject") or ""
+            if not subject:
+                continue
+            email_date = str(doc.get("email_date") or doc.get("created_date") or "")[:10]
+            label = f"{subject} ({email_date})" if email_date else subject
+            if label not in seen:
+                seen.add(label)
+                lines.append(f"- {label}")
+
+        if not lines:
+            return ""
+
+        return "[출처]\n" + "\n".join(lines)
 
     # ------------------------------------------------------------------
     # Deduplication
