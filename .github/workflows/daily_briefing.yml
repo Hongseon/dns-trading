@@ -1,8 +1,8 @@
 name: Daily Briefing
 on:
   schedule:
-    # UTC Sun-Thu 22:00 = KST Mon-Fri 07:00
-    - cron: '0 22 * * 0-4'
+    # UTC Mon-Fri 10:00 = KST Mon-Fri 19:00
+    - cron: '0 10 * * 1-5'
   workflow_dispatch:
     inputs:
       briefing_type:
