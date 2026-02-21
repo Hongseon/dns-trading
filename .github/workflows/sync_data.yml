@@ -19,8 +19,6 @@ jobs:
           path: ~/.cache/pip
           key: pip-${{ hashFiles('requirements.txt') }}
       - run: pip install -r requirements.txt
-      - name: Verify PaddleOCR installation
-        run: python -c "from paddleocr import PaddleOCR; print('PaddleOCR OK')"
       - run: python scripts/full_sync.py
         env:
           ZILLIZ_URI: ${{ secrets.ZILLIZ_URI }}

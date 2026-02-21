@@ -161,6 +161,13 @@ class NaverMailSync:
         stats: dict[str, int],
     ) -> None:
         """Index the body and attachments of a single email message."""
+        # Quick check: skip if this message body is already indexed
+        body_source_id = f"email:{msg.uid}:body"
+        if self._is_indexed(body_source_id):
+            logger.debug("Already indexed, skipping uid=%s", msg.uid)
+            stats["skipped"] += 1
+            return
+
         email_date = (
             msg.date.isoformat() if msg.date else datetime.now(timezone.utc).isoformat()
         )
@@ -169,7 +176,6 @@ class NaverMailSync:
         # ---- Body ----
         body_text = self._extract_body(msg)
         if body_text and body_text.strip():
-            body_source_id = f"email:{msg.uid}:body"
 
             meta = DocumentMetadata(
                 source_type="email",
@@ -327,6 +333,25 @@ class NaverMailSync:
         finally:
             if tmp_path and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
+
+    # ------------------------------------------------------------------
+    # Existence check
+    # ------------------------------------------------------------------
+
+    def _is_indexed(self, source_id: str) -> bool:
+        """Check whether *source_id* already has rows in the documents collection."""
+        try:
+            escaped_id = source_id.replace('"', '\\"')
+            results = self._client.query(
+                collection_name="documents",
+                filter=f'source_id == "{escaped_id}"',
+                output_fields=["source_id"],
+                limit=1,
+            )
+            return bool(results)
+        except Exception:
+            logger.debug("Existence check failed for %s, will re-index", source_id)
+            return False
 
     # ------------------------------------------------------------------
     # Sync-state persistence

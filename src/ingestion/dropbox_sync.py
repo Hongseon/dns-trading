@@ -97,12 +97,13 @@ class DropboxSync:
                 for entry in result.entries:
                     self._process_entry(entry, stats)
 
+                # Save cursor after each page so progress survives interruptions
+                self._save_cursor(result.cursor)
+
                 if not result.has_more:
                     break
                 result = self._dbx.files_list_folder_continue(result.cursor)
 
-            # Persist the latest cursor on success
-            self._save_cursor(result.cursor)
             logger.info(
                 "Dropbox sync complete: added=%d, deleted=%d, skipped=%d, errors=%d",
                 stats["added"],
@@ -174,6 +175,12 @@ class DropboxSync:
     ) -> None:
         """Download, extract, chunk, and index a single Dropbox file."""
         if not self._should_process(entry):
+            stats["skipped"] += 1
+            return
+
+        # Skip files already indexed in Zilliz (fast DB check vs slow download)
+        if self._is_indexed(entry.id):
+            logger.debug("Already indexed, skipping: %s", entry.path_display)
             stats["skipped"] += 1
             return
 
@@ -322,6 +329,25 @@ class DropboxSync:
             return False
 
         return True
+
+    # ------------------------------------------------------------------
+    # Existence check
+    # ------------------------------------------------------------------
+
+    def _is_indexed(self, source_id: str) -> bool:
+        """Check whether *source_id* already has rows in the documents collection."""
+        try:
+            escaped_id = source_id.replace('"', '\\"')
+            results = self._client.query(
+                collection_name="documents",
+                filter=f'source_id == "{escaped_id}"',
+                output_fields=["source_id"],
+                limit=1,
+            )
+            return bool(results)
+        except Exception:
+            logger.debug("Existence check failed for %s, will re-index", source_id)
+            return False
 
     # ------------------------------------------------------------------
     # Cursor persistence (sync_state collection)

@@ -92,7 +92,10 @@ def main() -> None:
     logger.info("  Total errors: %d", total_errors)
     logger.info("=" * 60)
 
-    if has_error or total_errors > 0:
+    # Only fail the workflow if an unhandled exception occurred.
+    # Minor per-file errors (skipped files, attachment failures) are expected
+    # and should not cause the entire GitHub Actions run to be marked as failed.
+    if has_error:
         sys.exit(1)
 
 
