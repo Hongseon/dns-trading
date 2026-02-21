@@ -39,6 +39,17 @@ _DNS_STAFF_EMAILS: set[str] = {
 
 _KST = timezone(timedelta(hours=9))
 
+
+def _format_datetime(raw: str) -> str:
+    """Format an ISO datetime string as 'MM/DD HH:MM'."""
+    if not raw:
+        return ""
+    try:
+        dt = datetime.fromisoformat(str(raw))
+        return dt.strftime("%m/%d %H:%M")
+    except (ValueError, TypeError):
+        return str(raw)[:16]
+
 # ------------------------------------------------------------------
 # Prompt templates
 # ------------------------------------------------------------------
@@ -423,19 +434,23 @@ class BriefingGenerator:
             folder = (doc.get("folder_path") or "").strip("/")
             if not filename:
                 continue
-            label = f"{folder}/{filename}" if folder else filename
-            if label not in seen:
-                seen.add(label)
+            name_key = f"{folder}/{filename}" if folder else filename
+            date_str = _format_datetime(doc.get("created_date") or "")
+            label = f"{name_key} ({date_str})" if date_str else name_key
+            if name_key not in seen:
+                seen.add(name_key)
                 lines.append(f"- {label}")
 
         for doc in data.get("received_emails", []) + data.get("sent_emails", []):
             subject = doc.get("email_subject") or ""
             if not subject:
                 continue
-            email_date = str(doc.get("email_date") or doc.get("created_date") or "")[:10]
-            label = f"{subject} ({email_date})" if email_date else subject
-            if label not in seen:
-                seen.add(label)
+            date_str = _format_datetime(
+                doc.get("email_date") or doc.get("created_date") or ""
+            )
+            label = f"{subject} ({date_str})" if date_str else subject
+            if subject not in seen:
+                seen.add(subject)
                 lines.append(f"- {label}")
 
         if not lines:
