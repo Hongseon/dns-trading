@@ -219,6 +219,7 @@ class BriefingGenerator:
         t_start = time.monotonic()
 
         if briefing_type not in _TYPE_LABELS:
+            raise ValueError(
                 f"Invalid briefing_type '{briefing_type}'. "
                 f"Must be one of {list(_TYPE_LABELS.keys())}."
             )
