@@ -1,9 +1,8 @@
 name: Daily Briefing
 on:
   schedule:
-    - cron: '0 0 * * *'    # UTC 00:00 = KST 09:00 (daily)
-    - cron: '0 0 * * 1'    # UTC 00:00 = KST 09:00 Monday (weekly)
-    - cron: '0 0 1 * *'    # UTC 00:00 = KST 09:00 1st of month (monthly)
+    # UTC Sun-Thu 22:00 = KST Mon-Fri 07:00
+    - cron: '0 22 * * 0-4'
   workflow_dispatch:
     inputs:
       briefing_type:
@@ -11,7 +10,7 @@ on:
         required: false
         default: 'daily'
         type: choice
-        options: [daily, weekly, monthly]
+        options: [daily, yesterday, weekly, last_week, monthly, last_month]
 
 jobs:
   briefing:
@@ -34,12 +33,14 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "type=${{ github.event.inputs.briefing_type }}" >> "$GITHUB_OUTPUT"
-          elif [ "$(date -u +%d)" = "01" ]; then
-            echo "type=monthly" >> "$GITHUB_OUTPUT"
-          elif [ "$(date -u +%u)" = "1" ]; then
-            echo "type=weekly" >> "$GITHUB_OUTPUT"
           else
-            echo "type=daily" >> "$GITHUB_OUTPUT"
+            # Use KST day-of-week: 5=Friday → weekly, else → daily
+            KST_DOW=$(TZ=Asia/Seoul date +%u)
+            if [ "$KST_DOW" = "5" ]; then
+              echo "type=weekly" >> "$GITHUB_OUTPUT"
+            else
+              echo "type=daily" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
       - name: Generate and send briefing
