@@ -63,6 +63,7 @@ class DropboxSync:
         self._supported_extensions = set(settings.supported_extensions)
         self._max_file_size_bytes = settings.max_file_size_mb * 1024 * 1024
 
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -82,17 +83,39 @@ class DropboxSync:
         try:
             if cursor:
                 logger.info("Resuming Dropbox sync with existing cursor")
-                result: ListFolderResult = self._dbx.files_list_folder_continue(cursor)
-            else:
+                try:
+                    result: ListFolderResult = self._dbx.files_list_folder_continue(cursor)
+                except Exception:
+                    logger.warning(
+                        "Cursor expired or invalid, re-establishing cursor"
+                    )
+                    cursor = None
+
+            if not cursor:
+                # No cursor: scan through all entries WITHOUT processing to
+                # establish a cursor quickly.  Existing data was indexed by
+                # prior local runs; only future *changes* need processing.
                 logger.info(
-                    "Starting initial Dropbox sync for folder: %s",
+                    "Establishing initial cursor for folder: %s (skip processing)",
                     self._folder_path,
                 )
                 result = self._dbx.files_list_folder(
                     self._folder_path, recursive=True
                 )
+                entry_count = 0
+                while True:
+                    entry_count += len(result.entries)
+                    self._save_cursor(result.cursor)
+                    if not result.has_more:
+                        break
+                    result = self._dbx.files_list_folder_continue(result.cursor)
+                logger.info(
+                    "Cursor established after scanning %d entries (no processing)",
+                    entry_count,
+                )
+                return stats
 
-            # Process all pages (has_more pagination loop)
+            # Incremental mode: process only changed entries
             while True:
                 for entry in result.entries:
                     self._process_entry(entry, stats)
@@ -175,12 +198,6 @@ class DropboxSync:
     ) -> None:
         """Download, extract, chunk, and index a single Dropbox file."""
         if not self._should_process(entry):
-            stats["skipped"] += 1
-            return
-
-        # Skip files already indexed in Zilliz (fast DB check vs slow download)
-        if self._is_indexed(entry.id):
-            logger.debug("Already indexed, skipping: %s", entry.path_display)
             stats["skipped"] += 1
             return
 
@@ -329,25 +346,6 @@ class DropboxSync:
             return False
 
         return True
-
-    # ------------------------------------------------------------------
-    # Existence check
-    # ------------------------------------------------------------------
-
-    def _is_indexed(self, source_id: str) -> bool:
-        """Check whether *source_id* already has rows in the documents collection."""
-        try:
-            escaped_id = source_id.replace('"', '\\"')
-            results = self._client.query(
-                collection_name="documents",
-                filter=f'source_id == "{escaped_id}"',
-                output_fields=["source_id"],
-                limit=1,
-            )
-            return bool(results)
-        except Exception:
-            logger.debug("Existence check failed for %s, will re-index", source_id)
-            return False
 
     # ------------------------------------------------------------------
     # Cursor persistence (sync_state collection)

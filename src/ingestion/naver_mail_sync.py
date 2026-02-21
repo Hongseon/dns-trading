@@ -74,6 +74,7 @@ class NaverMailSync:
         self._supported_extensions = set(settings.supported_extensions)
         self._max_file_size_bytes = settings.max_file_size_mb * 1024 * 1024
 
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -350,7 +351,6 @@ class NaverMailSync:
             )
             return bool(results)
         except Exception:
-            logger.debug("Existence check failed for %s, will re-index", source_id)
             return False
 
     # ------------------------------------------------------------------
