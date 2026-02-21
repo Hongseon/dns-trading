@@ -41,21 +41,4 @@ async def health():
     return {"status": "ok"}
 
 
-@app.get("/debug/rag")
-async def debug_rag(q: str = "테스트"):
-    """Temporary debug endpoint to test the RAG chain directly."""
-    import time
-    from src.rag.chain import get_chain
-
-    start = time.time()
-    try:
-        chain = get_chain()
-        answer = await chain.run(q)
-        elapsed = time.time() - start
-        return {"status": "ok", "elapsed": f"{elapsed:.2f}s", "answer": answer[:500]}
-    except Exception as e:
-        elapsed = time.time() - start
-        return {"status": "error", "elapsed": f"{elapsed:.2f}s", "error": str(e)}
-
-
 app.include_router(skill_router)

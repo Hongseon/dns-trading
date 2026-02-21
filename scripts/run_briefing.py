@@ -26,7 +26,7 @@ from src.briefing.sender import BriefingSender  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
-_VALID_TYPES = ("daily", "weekly", "monthly")
+_VALID_TYPES = ("daily", "yesterday", "weekly", "last_week", "monthly", "last_month")
 
 
 async def main() -> None:

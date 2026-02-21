@@ -78,6 +78,19 @@ async def skill_query(request: Request):
         list(body.get("userRequest", {}).keys()),
     )
 
+    # -- Briefing detection ----------------------------------------
+    briefing_type = _detect_briefing_request(utterance)
+    if briefing_type:
+        logger.info("Detected briefing request: type=%s", briefing_type)
+        if callback_url:
+            asyncio.create_task(
+                process_briefing_and_callback(briefing_type, callback_url)
+            )
+            return make_kakao_response("브리핑을 생성하고 있습니다...", use_callback=True)
+        return make_kakao_response(
+            "브리핑 생성에는 시간이 필요합니다. 콜백이 활성화되지 않았습니다."
+        )
+
     # -- Callback mode (AI chatbot) --------------------------------
     if callback_url:
         asyncio.create_task(process_and_callback(utterance, callback_url))
@@ -141,16 +154,48 @@ async def skill_briefing(request: Request):
 # Internal helpers
 # ------------------------------------------------------------------
 
-_WEEKLY_KEYWORDS = ("주간", "이번 주", "이번주", "금주")
-_MONTHLY_KEYWORDS = ("월간", "이번 달", "이번달", "금월")
+# Ordered from most specific to least specific for correct matching.
+# Each tuple: (keywords, briefing_type)
+_BRIEFING_TYPE_PATTERNS: list[tuple[tuple[str, ...], str]] = [
+    # Yesterday
+    (("어제 업무", "어제 뭐", "어제 브리핑", "어제 한 일", "어제 뭐했"), "yesterday"),
+    # Last week
+    (("지난 주", "지난주", "저번 주", "저번주", "전주"), "last_week"),
+    # Last month
+    (("지난 달", "지난달", "저번 달", "저번달", "전월"), "last_month"),
+    # Daily (today)
+    (("오늘 업무", "오늘 뭐", "오늘 브리핑", "오늘 한 일", "일간"), "daily"),
+    # Weekly (this week)
+    (("이번 주", "이번주", "금주", "주간"), "weekly"),
+    # Monthly (this month)
+    (("이번 달", "이번달", "금월", "월간"), "monthly"),
+]
+
+# Generic briefing keywords (fallback to daily)
+_GENERIC_BRIEFING_KEYWORDS = ("업무 브리핑", "업무 요약", "브리핑 해줘", "브리핑해줘")
+
+
+def _detect_briefing_request(utterance: str) -> str | None:
+    """Detect if the utterance is a briefing request.
+
+    Returns the briefing type if detected, ``None`` otherwise.
+    """
+    for keywords, btype in _BRIEFING_TYPE_PATTERNS:
+        for kw in keywords:
+            if kw in utterance:
+                return btype
+
+    for kw in _GENERIC_BRIEFING_KEYWORDS:
+        if kw in utterance:
+            return "daily"
+
+    return None
 
 
 def _detect_briefing_type(utterance: str) -> str:
-    """Infer the briefing period from the user's utterance."""
-    for kw in _WEEKLY_KEYWORDS:
-        if kw in utterance:
-            return "weekly"
-    for kw in _MONTHLY_KEYWORDS:
-        if kw in utterance:
-            return "monthly"
-    return "daily"
+    """Infer the briefing period from the user's utterance.
+
+    Used by ``/skill/briefing`` endpoint. Falls back to ``"daily"``.
+    """
+    result = _detect_briefing_request(utterance)
+    return result if result else "daily"

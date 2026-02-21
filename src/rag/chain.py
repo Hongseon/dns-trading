@@ -112,10 +112,9 @@ class RAGChain:
         # Step 3 -- Truncate
         return _truncate(answer, _KAKAO_MAX_CHARS)
 
-
-# ======================================================================
-# Module-level singleton
-# ======================================================================
+    # ------------------------------------------------------------------
+    # Search-only fallback (no LLM)
+    # ------------------------------------------------------------------
 
     def search_only(self, query: str, top_k: int = 3) -> str:
         """Return formatted search results without LLM generation.
@@ -139,6 +138,10 @@ class RAGChain:
         header = f"검색 결과 ({len(results)}건):\n\n"
         return header + "\n\n".join(parts)
 
+
+# ======================================================================
+# Module-level singleton
+# ======================================================================
 
 _chain: RAGChain | None = None
 
