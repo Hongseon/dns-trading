@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     kakao_admin_key: str = ""
     kakao_channel_id: str = ""
 
+    # Admin API
+    admin_api_key: str = ""
+
     # App constants
     embedding_dim: int = 768
     chunk_size: int = 500

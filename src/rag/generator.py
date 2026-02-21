@@ -78,26 +78,14 @@ class Generator:
         query: str,
         context: str,
         sources: list[str],
-    ) -> str:
+    ) -> tuple[str, dict]:
         """Generate an RAG answer from *context* for the user *query*.
-
-        The method builds a user prompt that includes the retrieved context
-        and the original question, calls the LLM, and appends source
-        citations if the model did not already include them.
-
-        Parameters
-        ----------
-        query:
-            The user's natural-language question.
-        context:
-            Formatted document context from :meth:`Retriever.format_context`.
-        sources:
-            List of citation strings from :meth:`Retriever.extract_sources`.
 
         Returns
         -------
-        str
-            The generated answer with source citations appended.
+        tuple[str, dict]
+            The generated answer and a usage dict with keys
+            ``model``, ``input_tokens``, ``output_tokens``.
         """
         user_prompt = _USER_PROMPT_TEMPLATE.format(
             context=context,
@@ -105,12 +93,12 @@ class Generator:
         )
 
         # Try primary model, fall back on any exception
-        answer = await self._call_with_fallback(user_prompt)
+        answer, usage = await self._call_with_fallback(user_prompt)
 
         # Append source citations if the model did not include them
         answer = self._ensure_sources(answer, sources)
 
-        return answer
+        return answer, usage
 
     # ------------------------------------------------------------------
     # LLM call helpers
@@ -121,18 +109,13 @@ class Generator:
         user_prompt: str,
         system_instruction: str | None = None,
         max_output_tokens: int = 1024,
-    ) -> str:
+    ) -> tuple[str, dict]:
         """Try the primary model; on failure, retry with the fallback.
 
-        Parameters
-        ----------
-        user_prompt:
-            The prompt to send.
-        system_instruction:
-            Optional override for the system prompt.  Defaults to
-            :data:`SYSTEM_PROMPT` when ``None``.
-        max_output_tokens:
-            Maximum output tokens (default 1024).
+        Returns
+        -------
+        tuple[str, dict]
+            The model's text response and a usage dict.
         """
         try:
             return await self._call_llm(
@@ -157,7 +140,7 @@ class Generator:
             return (
                 "죄송합니다. 현재 답변을 생성할 수 없습니다. "
                 "잠시 후 다시 시도해 주세요."
-            )
+            ), {}
 
     async def _call_llm(
         self,
@@ -165,24 +148,14 @@ class Generator:
         user_prompt: str,
         system_instruction: str | None = None,
         max_output_tokens: int = 1024,
-    ) -> str:
-        """Call a single Gemini model and return the text response.
-
-        Parameters
-        ----------
-        model:
-            The model identifier (e.g. ``"gemini-3-flash-preview"``).
-        user_prompt:
-            The fully assembled user prompt including context and query.
-        system_instruction:
-            Optional override for the system prompt.
-        max_output_tokens:
-            Maximum output tokens.
+    ) -> tuple[str, dict]:
+        """Call a single Gemini model and return the text response with usage.
 
         Returns
         -------
-        str
-            The model's text response.
+        tuple[str, dict]
+            The model's text response and a usage dict with keys
+            ``model``, ``input_tokens``, ``output_tokens``.
 
         Raises
         ------
@@ -204,18 +177,26 @@ class Generator:
             config=config,
         )
 
+        # Extract usage metadata
+        usage: dict = {"model": model, "input_tokens": 0, "output_tokens": 0}
+        if hasattr(response, "usage_metadata") and response.usage_metadata:
+            meta = response.usage_metadata
+            usage["input_tokens"] = getattr(meta, "prompt_token_count", 0) or 0
+            usage["output_tokens"] = getattr(meta, "candidates_token_count", 0) or 0
+
         # Extract text from the response
         text = response.text or ""
         text = text.strip()
 
         if not text:
             logger.warning("Model %s returned empty response", model)
-            return "답변을 생성하지 못했습니다. 다시 시도해 주세요."
+            return "답변을 생성하지 못했습니다. 다시 시도해 주세요.", usage
 
         logger.info(
-            "Model %s responded (%d chars)", model, len(text)
+            "Model %s responded (%d chars, %d+%d tokens)",
+            model, len(text), usage["input_tokens"], usage["output_tokens"],
         )
-        return text
+        return text, usage
 
     # ------------------------------------------------------------------
     # Source citation helpers
@@ -226,23 +207,23 @@ class Generator:
         query: str,
         context: str,
         sources: list[str],
-    ) -> str:
+    ) -> tuple[str, dict]:
         """Generate a concise RAG answer for the non-callback (5s) path."""
         user_prompt = _USER_PROMPT_TEMPLATE.format(context=context, query=query)
 
         try:
-            answer = await self._call_llm(
+            answer, usage = await self._call_llm(
                 self.model, user_prompt, max_output_tokens=512,
             )
         except Exception:
             try:
-                answer = await self._call_llm(
+                answer, usage = await self._call_llm(
                     self.fallback_model, user_prompt, max_output_tokens=512,
                 )
             except Exception:
-                return "현재 답변을 생성할 수 없습니다. 잠시 후 다시 시도해 주세요."
+                return "현재 답변을 생성할 수 없습니다. 잠시 후 다시 시도해 주세요.", {}
 
-        return self._ensure_sources(answer, sources)
+        return self._ensure_sources(answer, sources), usage
 
     @staticmethod
     def _ensure_sources(answer: str, sources: list[str]) -> str:

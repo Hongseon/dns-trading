@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from src.server.admin import router as admin_router
 from src.server.skill_handler import router as skill_router
 
 logging.basicConfig(
@@ -42,3 +43,4 @@ async def health():
 
 
 app.include_router(skill_router)
+app.include_router(admin_router)

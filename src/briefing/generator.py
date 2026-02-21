@@ -7,7 +7,9 @@ a structured Korean briefing with separate sections for files and emails.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from calendar import monthrange
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -15,6 +17,7 @@ from typing import Any
 from src.db.zilliz_client import get_client
 from src.rag.retriever import Retriever
 from src.rag.generator import Generator
+from src.server import chat_logger
 
 logger = logging.getLogger(__name__)
 
@@ -213,8 +216,9 @@ class BriefingGenerator:
         str
             The generated briefing text.
         """
+        t_start = time.monotonic()
+
         if briefing_type not in _TYPE_LABELS:
-            raise ValueError(
                 f"Invalid briefing_type '{briefing_type}'. "
                 f"Must be one of {list(_TYPE_LABELS.keys())}."
             )
@@ -254,8 +258,9 @@ class BriefingGenerator:
             "모든 섹션을 빠짐없이 작성하고, 900자 이내로 완성하세요. "
             "할 일/일정 항목은 제공된 데이터 내에서만 추출하세요."
         )
+        usage: dict = {}
         try:
-            content = await self.generator._call_with_fallback(
+            content, usage = await self.generator._call_with_fallback(
                 prompt,
                 system_instruction=briefing_system,
                 max_output_tokens=2048,
@@ -272,9 +277,20 @@ class BriefingGenerator:
         # Persist
         self._save_briefing(briefing_type, content)
 
+        elapsed_ms = int((time.monotonic() - t_start) * 1000)
         logger.info(
             "%s briefing generated (%d chars)", briefing_type, len(content)
         )
+
+        # Fire-and-forget logging
+        asyncio.create_task(chat_logger.log_chat(
+            query_type="briefing",
+            user_query=briefing_type,
+            response=content,
+            usage=usage,
+            response_time_ms=elapsed_ms,
+        ))
+
         return content
 
     # ------------------------------------------------------------------

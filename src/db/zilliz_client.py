@@ -44,6 +44,7 @@ def get_client() -> MilvusClient:
 _DOCUMENTS_COLLECTION = "documents"
 _SYNC_STATE_COLLECTION = "sync_state"
 _BRIEFINGS_COLLECTION = "briefings"
+_CHAT_LOGS_COLLECTION = "chat_logs"
 
 
 def init_collections() -> None:
@@ -52,6 +53,7 @@ def init_collections() -> None:
     _init_documents_collection(client)
     _init_sync_state_collection(client)
     _init_briefings_collection(client)
+    _init_chat_logs_collection(client)
     logger.info("All collections initialized")
 
 
@@ -165,3 +167,41 @@ def _init_briefings_collection(client: MilvusClient) -> None:
         index_params=index_params,
     )
     logger.info("Created collection '%s'", _BRIEFINGS_COLLECTION)
+
+
+def _init_chat_logs_collection(client: MilvusClient) -> None:
+    """Create the chat_logs collection for conversation and cost tracking."""
+    if client.has_collection(_CHAT_LOGS_COLLECTION):
+        logger.info("Collection '%s' already exists", _CHAT_LOGS_COLLECTION)
+        return
+
+    schema = client.create_schema(enable_dynamic_field=False)
+
+    schema.add_field("id", DataType.INT64, is_primary=True, auto_id=True)
+    schema.add_field("query_type", DataType.VARCHAR, max_length=20)
+    schema.add_field("user_query", DataType.VARCHAR, max_length=2000, default_value="")
+    schema.add_field("response", DataType.VARCHAR, max_length=60000, default_value="")
+    schema.add_field("model_used", DataType.VARCHAR, max_length=50, default_value="")
+    schema.add_field("input_tokens", DataType.INT64, default_value=0)
+    schema.add_field("output_tokens", DataType.INT64, default_value=0)
+    schema.add_field("total_tokens", DataType.INT64, default_value=0)
+    schema.add_field("cost_usd", DataType.FLOAT, default_value=0.0)
+    schema.add_field("response_time_ms", DataType.INT64, default_value=0)
+    schema.add_field("created_at", DataType.VARCHAR, max_length=50, default_value="")
+
+    # Milvus requires at least one vector field.
+    schema.add_field("_dummy_vec", DataType.FLOAT_VECTOR, dim=2)
+
+    index_params = client.prepare_index_params()
+    index_params.add_index(
+        field_name="_dummy_vec",
+        index_type="AUTOINDEX",
+        metric_type="COSINE",
+    )
+
+    client.create_collection(
+        collection_name=_CHAT_LOGS_COLLECTION,
+        schema=schema,
+        index_params=index_params,
+    )
+    logger.info("Created collection '%s'", _CHAT_LOGS_COLLECTION)

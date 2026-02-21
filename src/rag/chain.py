@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 from src.rag.generator import Generator
 from src.rag.retriever import Retriever
+from src.server import chat_logger
 
 logger = logging.getLogger(__name__)
 
@@ -44,23 +46,9 @@ class RAGChain:
         3. Extract source citations.
         4. Generate an answer via the LLM.
         5. Truncate to the KakaoTalk 1 000-character limit.
-
-        Parameters
-        ----------
-        query:
-            User question in natural language.
-        source_type:
-            Optional filter -- ``"dropbox"`` or ``"email"``.
-        after_date:
-            Optional ISO-8601 date filter.
-        top_k:
-            Number of chunks to retrieve (default 5).
-
-        Returns
-        -------
-        str
-            The final answer, guaranteed to be at most 1 000 characters.
         """
+        t_start = time.monotonic()
+
         # Step 1 -- Retrieve (synchronous, run in thread to avoid blocking)
         results, context, sources = await asyncio.to_thread(
             self.retriever.search_and_prepare,
@@ -76,17 +64,28 @@ class RAGChain:
             return "관련 문서를 찾을 수 없습니다. 다른 키워드로 검색해 보세요."
 
         # Step 2 -- Generate
-        answer = await self.generator.generate(query, context, sources)
+        answer, usage = await self.generator.generate(query, context, sources)
 
         # Step 3 -- Truncate to KakaoTalk limit
         answer = _truncate(answer, _KAKAO_MAX_CHARS)
 
+        elapsed_ms = int((time.monotonic() - t_start) * 1000)
         logger.info(
             "RAG run complete (%d results, %d char answer) for: %s",
             len(results),
             len(answer),
             query[:60],
         )
+
+        # Fire-and-forget logging
+        asyncio.create_task(chat_logger.log_chat(
+            query_type="rag",
+            user_query=query,
+            response=answer,
+            usage=usage,
+            response_time_ms=elapsed_ms,
+        ))
+
         return answer
 
     # ------------------------------------------------------------------
@@ -99,6 +98,8 @@ class RAGChain:
         Uses fewer retrieved chunks (``top_k=2``) and a shorter max token
         limit to fit within the 5-second KakaoTalk skill timeout.
         """
+        t_start = time.monotonic()
+
         # Step 1 -- Retrieve with minimal chunks
         results, context, sources = await asyncio.to_thread(
             self.retriever.search_and_prepare, query, None, None, 2
@@ -107,10 +108,21 @@ class RAGChain:
             return "관련 문서를 찾을 수 없습니다. 다른 키워드로 검색해 보세요."
 
         # Step 2 -- Generate with shorter output
-        answer = await self.generator.generate_quick(query, context, sources)
+        answer, usage = await self.generator.generate_quick(query, context, sources)
 
         # Step 3 -- Truncate
-        return _truncate(answer, _KAKAO_MAX_CHARS)
+        answer = _truncate(answer, _KAKAO_MAX_CHARS)
+
+        elapsed_ms = int((time.monotonic() - t_start) * 1000)
+        asyncio.create_task(chat_logger.log_chat(
+            query_type="rag_quick",
+            user_query=query,
+            response=answer,
+            usage=usage,
+            response_time_ms=elapsed_ms,
+        ))
+
+        return answer
 
     # ------------------------------------------------------------------
     # Search-only fallback (no LLM)
