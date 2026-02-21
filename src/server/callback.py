@@ -31,15 +31,58 @@ _CALLBACK_TIMEOUT = 10.0  # seconds for the outbound POST
 
 
 def _build_callback_payload(text: str) -> dict:
-    """Build the JSON payload to POST back to the KakaoTalk callback URL."""
+    """Build the JSON payload to POST back to the KakaoTalk callback URL.
+
+    KakaoTalk limits each simpleText to 1 000 characters and allows up to
+    3 outputs per response.  If *text* exceeds 1 000 chars, it is split
+    into multiple bubbles at line boundaries.
+    """
+    chunks = _split_text_for_kakao(text, max_chars=1000, max_outputs=3)
+    outputs = [{"simpleText": {"text": c}} for c in chunks]
     return {
         "version": "2.0",
-        "template": {
-            "outputs": [
-                {"simpleText": {"text": text[:1000]}}
-            ],
-        },
+        "template": {"outputs": outputs},
     }
+
+
+def _split_text_for_kakao(
+    text: str, max_chars: int = 1000, max_outputs: int = 3
+) -> list[str]:
+    """Split *text* into up to *max_outputs* chunks of at most *max_chars*.
+
+    Splits at the last newline before the limit so sections stay intact.
+    """
+    if len(text) <= max_chars:
+        return [text]
+
+    chunks: list[str] = []
+    remaining = text
+
+    while remaining and len(chunks) < max_outputs:
+        if len(remaining) <= max_chars:
+            chunks.append(remaining)
+            break
+
+        # Find a newline near the end of the allowed range
+        cut = remaining.rfind("\n", 0, max_chars)
+        if cut <= 0:
+            cut = max_chars  # no good newline, hard cut
+
+        chunk = remaining[:cut].rstrip()
+        remaining = remaining[cut:].lstrip("\n")
+
+        if chunk:
+            chunks.append(chunk)
+
+    # If there's still text left after max_outputs, append ellipsis
+    if remaining and len(chunks) == max_outputs:
+        last = chunks[-1]
+        if len(last) + 4 <= max_chars:
+            chunks[-1] = last + "\n..."
+        else:
+            chunks[-1] = last[:max_chars - 3] + "..."
+
+    return chunks
 
 
 async def _post_callback(callback_url: str, payload: dict) -> None:
