@@ -1,5 +1,7 @@
 # DnS Trading RAG Chatbot
 
+[Korean](./README.md)
+
 This project is a RAG-based internal chatbot that indexes company Dropbox documents and Naver emails, then lets users search and ask questions through KakaoTalk.
 
 It was designed to make scattered work materials such as contracts, meeting emails, and business documents searchable directly from a familiar messaging interface.
