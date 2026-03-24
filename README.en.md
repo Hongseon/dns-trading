@@ -2,14 +2,41 @@
 
 [Korean](./README.md)
 
-This project is a RAG-based internal chatbot that indexes company Dropbox documents and Naver emails, then lets users search and ask questions through KakaoTalk.
+This project is a business-facing RAG chatbot that enables users to access operational knowledge from documents and emails through natural language queries via KakaoTalk.
 
-It was designed to make scattered work materials such as contracts, meeting emails, and business documents searchable directly from a familiar messaging interface.
+It was built to solve the problem of fragmented information across Dropbox files and emails, allowing non-technical users to quickly retrieve relevant information without manual searching.
 
 ## Overview
 
-The main goal of this project is to unify distributed documents and emails into a single retrieval flow.  
-A FastAPI server handles Kakao skill requests, retrieves relevant context from Zilliz Cloud (Milvus), and uses Gemini models for embedding and answer generation.
+The system unifies distributed business data into a single retrieval pipeline.
+
+A FastAPI server handles KakaoTalk skill requests, retrieves relevant context from Zilliz Cloud (Milvus), and uses Gemini models for embedding and answer generation.
+
+This enables users to interact with business knowledge through a familiar messaging interface.
+
+## Problem
+
+The business is operated by two family members working across different countries and time zones.
+
+- One user relocated overseas, making real-time communication difficult
+- Business data was scattered across emails and Dropbox documents
+- It was time-consuming to locate past materials or understand ongoing work
+
+As a result, sharing work context and tracking progress became inefficient.
+
+## Solution
+
+- Built a system that aggregates emails and documents into a unified knowledge base
+- Implemented a RAG pipeline to enable semantic search and question answering
+- Integrated the system with KakaoTalk to provide a simple, real-time interface for non-technical users
+- Added automated briefing generation to summarize ongoing work
+
+## Impact
+
+- Eliminated the need for manual reporting or document searching
+- Enabled instant access to business context through natural language queries
+- Improved communication and coordination despite time zone differences
+- Users reported high satisfaction due to reduced friction in daily operations
 
 ## Features
 
@@ -23,17 +50,28 @@ A FastAPI server handles Kakao skill requests, retrieves relevant context from Z
 ## Technical Highlights
 
 ### Unified Retrieval Flow
-Dropbox files and emails are processed through the same retrieval pipeline so users can search without thinking about where the original data is stored.
+Dropbox files and emails are processed through a single pipeline, allowing users to search without needing to know the original data source.
 
 ### Latency-Aware Bot Design
-The bot was designed around Kakao skill response time limits, using a callback-based response flow for longer-running requests.  
-To reduce cold-start issues on the Render free tier, a health-check keepalive workflow was also added for operational stability.
+Designed around KakaoTalk skill response time limits using a callback-based response flow for longer-running requests.  
+A keep-alive workflow was implemented to reduce cold-start latency on the Render free tier.
 
 ### Practical Document Processing
-The ingestion layer supports file formats commonly used in real business environments, including PDF, Office documents, HWP, and ZIP archives.
+Supports real-world business formats including PDF, Office documents, HWP, and ZIP archives.
 
 ### Operational Visibility
-The system tracks chat logs, response times, token usage, and estimated LLM cost so that performance and usage can be monitored in production-like conditions.
+Tracks chat logs, response times, token usage, and estimated LLM costs to monitor system performance.
+
+## Design Decisions
+
+- **RAG over fine-tuning**  
+  Chosen to enable dynamic updates without retraining and to reduce operational cost
+
+- **KakaoTalk integration**  
+  Selected as the primary interface since it is already familiar to non-technical users
+
+- **Vector search (Milvus)**  
+  Used for scalable semantic retrieval across heterogeneous data sources
 
 ## Tech Stack
 
@@ -55,6 +93,12 @@ flowchart TD
     E --> F[KakaoTalk Chatbot]
 ```
 
+## Screenshot
+
+An example of the chatbot in actual use on a mobile device.
+
+![DnS bot screenshot](./docs/image/dnsbot-screenshot.PNG)
+
 ## Project Structure
 
 ```text
@@ -69,14 +113,23 @@ tests/         # Pytest-based test suite
 docs/          # Operational and implementation notes
 ```
 
+## Lessons Learned
+
+- Retrieval quality significantly impacts LLM output quality
+- Effective use of metadata is important for both retrieval accuracy and answer quality
+- User adoption depends heavily on interface familiarity and simplicity
+- Latency constraints must be considered when integrating with messaging platforms
+
 ## Why This Project
 
-### Real Users
-The intended users are two employees collaborating remotely across two different countries.
+This project was built for a real small business operated by two family members.
 
-### Business Problem
-Because the team works across countries and time zones, it is difficult to keep business context aligned in real time. At the same time, historical materials are scattered across files and emails, making it slow to locate the information needed for ongoing work.  
-This project was built to make past documents easier to find and to improve day-to-day knowledge sharing through a familiar chat interface.
+As one member relocated overseas, collaboration became challenging due to time zone differences and fragmented information across emails and documents.
 
-### Expected Impact
-Even with time zone differences, team members can share work context more smoothly and retrieve past materials much faster, making daily execution and follow-up work significantly easier.
+The system was designed to:
+
+- Reduce dependency on manual reporting
+- Enable quick access to past and current business information
+- Improve day-to-day collaboration through a familiar chat interface
+
+Ultimately, the system allowed users to stay aligned without additional effort, significantly improving their workflow and satisfaction.
