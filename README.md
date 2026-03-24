@@ -71,25 +71,6 @@ tests/         # pytest 기반 테스트
 docs/          # 운영/구현 문서
 ```
 
-## Local Run
-
-```bash
-pip install -r requirements.txt
-uvicorn src.server.main:app --reload
-```
-
-Health check:
-
-```bash
-curl http://127.0.0.1:8000/health
-```
-
-## Test
-
-```bash
-python -m pytest -q
-```
-
 ## Why This Project
 
 이 프로젝트는 단순한 챗봇 구현이 아니라, 실제 업무 환경에서 흩어져 있는 비정형 정보를 검색 가능한 시스템으로 연결하고,  
