@@ -6,13 +6,15 @@ Designed for deployment on Render free tier with uvicorn.
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 
 from src.server.admin import router as admin_router
 from src.server.skill_handler import router as skill_router
+from src.server.warmup import start_rag_warmup
 
 logging.basicConfig(
     level=logging.INFO,
@@ -23,9 +25,18 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan handler -- log startup and shutdown."""
+    """Application lifespan handler -- log startup, warm dependencies, shutdown."""
     logger.info("Starting DnS Trading RAG Bot...")
-    yield
+    warmup_task = start_rag_warmup()
+    app.state.rag_warmup_task = warmup_task
+
+    try:
+        yield
+    finally:
+        if not warmup_task.done():
+            warmup_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await warmup_task
     logger.info("Shutting down...")
 
 
