@@ -118,6 +118,18 @@ class TestChunkOverlap:
                     "Expected some overlap between consecutive chunks"
                 )
 
+    def test_chunk_overlap_preserves_word_boundaries(self):
+        """Overlapping chunks should not glue adjacent words together."""
+        chunker = TextChunker(chunk_size=50, chunk_overlap=15)
+        words = [f"word{i}" for i in range(40)]
+        text = " ".join(words)
+
+        result = chunker.split(text)
+
+        if len(result) >= 2:
+            assert "word7word8" not in result[1].text
+            assert "word15word16" not in result[2].text
+
 
 class TestChunkMetadataPreserved:
     """Metadata dict passed to split() should be copied to every chunk."""

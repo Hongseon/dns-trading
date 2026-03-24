@@ -183,12 +183,14 @@ class TextChunker:
 
         For each chunk after the first, prepend the last *overlap* characters
         from the previous chunk (trying to break at a word boundary within
-        the overlap region for readability).
+        the overlap region for readability). The merged output is allowed to
+        grow up to ``chunk_size + chunk_overlap`` so overlap is preserved.
         """
         if not chunks or self.chunk_overlap <= 0:
             return chunks
 
         merged: list[str] = [chunks[0]]
+        max_merged_len = self.chunk_size + self.chunk_overlap
 
         for i in range(1, len(chunks)):
             prev = chunks[i - 1]
@@ -202,12 +204,38 @@ class TextChunker:
             if space_idx != -1 and space_idx < len(overlap_text) - 1:
                 overlap_text = overlap_text[space_idx + 1 :]
 
-            # Only prepend overlap if the combined length stays within budget
-            combined = overlap_text + curr
-            if len(combined.strip()) <= self.chunk_size:
+            # Preserve readability when the original split removed a separator.
+            joiner = self._overlap_joiner(overlap_text, curr)
+
+            # Keep overlap when it fits within the overlap budget.
+            combined = overlap_text + joiner + curr if overlap_text else curr
+            if len(combined.strip()) <= max_merged_len:
                 merged.append(combined)
-            else:
-                # If overlap would push us over the limit, skip it
+                continue
+
+            # If overlap would exceed the budget, keep as much tail overlap
+            # as fits so consecutive chunks still share context.
+            available_overlap = max_merged_len - len(curr) - len(joiner)
+            if available_overlap <= 0:
                 merged.append(curr)
+                continue
+
+            trimmed_overlap = overlap_text[-available_overlap:]
+            space_idx = trimmed_overlap.find(" ")
+            if space_idx != -1 and space_idx < len(trimmed_overlap) - 1:
+                trimmed_overlap = trimmed_overlap[space_idx + 1 :]
+
+            joiner = self._overlap_joiner(trimmed_overlap, curr)
+            combined = trimmed_overlap + joiner + curr if trimmed_overlap else curr
+            merged.append(combined if len(combined.strip()) <= max_merged_len else curr)
 
         return merged
+
+    @staticmethod
+    def _overlap_joiner(overlap_text: str, curr: str) -> str:
+        """Return a separator when overlap and current chunk would concatenate."""
+        if not overlap_text or not curr:
+            return ""
+        if overlap_text[-1].isspace() or curr[0].isspace():
+            return ""
+        return " "
