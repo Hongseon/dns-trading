@@ -44,17 +44,13 @@ PDF, Office 문서, HWP, ZIP 등 실제 업무 환경에서 자주 사용하는 
 
 ## Architecture
 
-```text
-Dropbox / Naver Mail
-        ↓
-Ingestion Pipeline
-(text extraction, chunking, embedding, indexing)
-        ↓
-Zilliz Vector DB
-        ↓
-FastAPI Skill Server
-        ↓
-KakaoTalk Chatbot
+```mermaid
+flowchart TD
+    A[Dropbox / Naver Mail] --> B[Ingestion Pipeline]
+    B --> C[Text Extraction / Chunking / Embedding / Indexing]
+    C --> D[Zilliz Vector DB]
+    D --> E[FastAPI Skill Server]
+    E --> F[KakaoTalk Chatbot]
 ```
 
 ## Project Structure
@@ -73,5 +69,12 @@ docs/          # 운영/구현 문서
 
 ## Why This Project
 
-이 프로젝트는 단순한 챗봇 구현이 아니라, 실제 업무 환경에서 흩어져 있는 비정형 정보를 검색 가능한 시스템으로 연결하고,  
-외부 API 제약과 배포 환경의 운영 이슈까지 고려해 end-to-end로 설계하고 구현한 작업입니다.
+### Real Users
+이 시스템의 실제 사용자는 서로 다른 2개 국가에서 원격으로 협업하는 직원 2명입니다.
+
+### Business Problem
+원격 협업 환경과 시차 때문에 업무 맥락을 빠르게 공유하기 어렵고, 과거 업무 자료가 파일과 메일 형태로 흩어져 있어 필요한 정보를 찾는 데 시간이 많이 들었습니다.  
+이 프로젝트는 이러한 문제를 줄이기 위해, 과거 자료를 쉽고 빠르게 검색하고 카카오톡 안에서 바로 확인할 수 있도록 설계했습니다.
+
+### Expected Impact
+시차가 있더라도 업무 내용을 더 원활하게 공유할 수 있고, 과거 자료를 빠르게 찾아 후속 업무를 진행할 수 있어 전체 협업 효율이 높아지는 것을 기대합니다.
