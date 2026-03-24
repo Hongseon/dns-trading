@@ -97,7 +97,9 @@ flowchart TD
 
 An example of the chatbot in actual use on a mobile device.
 
-<img src="./docs/image/dnsbot-screenshot.PNG" alt="DnS bot screenshot" width="320" />
+<p align="center">
+  <img src="./docs/image/dnsbot-screenshot.PNG" alt="DnS bot screenshot" width="320" />
+</p>
 
 ## Project Structure
 
