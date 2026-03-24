@@ -97,7 +97,7 @@ flowchart TD
 
 실제 휴대폰에서 사용 중인 카카오톡 인터페이스 예시입니다.
 
-![DnS bot screenshot](./docs/image/dnsbot-screenshot.PNG)
+<img src="./docs/image/dnsbot-screenshot.PNG" alt="DnS bot screenshot" width="320" />
 
 ## Project Structure
 
