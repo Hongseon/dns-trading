@@ -15,6 +15,9 @@ Add this repository secret in GitHub:
 - Calls `GET /health` every 5 minutes.
 - Prevents the 15-minute Render free-tier idle sleep from triggering.
 - Reduces first-request failures from KakaoTalk skill timeouts.
+- Retries timeouts and transient network errors long enough to survive Render
+  cold starts. GitHub Actions `exit code 28` typically means the `curl`
+  request hit its timeout window before Render finished waking up.
 
 ## Validation
 
