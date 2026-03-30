@@ -1,0 +1,19 @@
+# Minimal dependencies for the Data Sync GitHub Actions workflow.
+# Excludes optional OCR packages so scheduled sync stays within time limits.
+
+pymilvus>=2.5
+google-genai==1.*
+dropbox==12.*
+imap-tools==1.*
+PyMuPDF==1.27.*
+python-docx==1.*
+openpyxl==3.*
+xlrd==2.*
+python-pptx==1.*
+beautifulsoup4==4.*
+gethwp==1.*
+olefile>=0.47
+lxml
+python-dotenv==1.*
+pydantic==2.*
+pydantic-settings

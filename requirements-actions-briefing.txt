@@ -1,0 +1,8 @@
+# Minimal dependencies for the Daily Briefing GitHub Actions workflow.
+# Excludes web server and ingestion-only packages to keep installs fast.
+
+pymilvus>=2.5
+google-genai==1.*
+python-dotenv==1.*
+pydantic==2.*
+pydantic-settings
