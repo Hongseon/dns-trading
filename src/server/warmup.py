@@ -61,6 +61,15 @@ def start_rag_warmup() -> asyncio.Task[bool]:
     )
 
 
+def ensure_rag_warmup_started(app_state) -> asyncio.Task[bool]:
+    """Ensure a background warmup task exists without waiting for it."""
+    task: asyncio.Task[bool] | None = getattr(app_state, "rag_warmup_task", None)
+    if task is None or task.cancelled():
+        task = start_rag_warmup()
+        app_state.rag_warmup_task = task
+    return task
+
+
 async def ensure_rag_warmup(app_state) -> bool:
     """Ensure there is a single shared warmup task and await its result."""
     task: asyncio.Task[bool] | None = getattr(app_state, "rag_warmup_task", None)

@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 from src.server.admin import router as admin_router
 from src.server.skill_handler import router as skill_router
 from src.server.warmup import (
-    ensure_rag_warmup,
+    ensure_rag_warmup_started,
     get_rag_warmup_status,
     start_rag_warmup,
 )
@@ -60,11 +60,11 @@ async def health():
 
 @app.get("/warmup")
 async def warmup():
-    """Readiness endpoint that waits for RAG warmup to complete."""
-    warmed = await ensure_rag_warmup(app.state)
+    """Readiness endpoint that triggers background warmup and returns status."""
+    ensure_rag_warmup_started(app.state)
     rag_status = get_rag_warmup_status(app.state)
 
-    if warmed:
+    if rag_status in {"ready", "warming"}:
         return {"status": "ok", "rag": rag_status}
 
     status_code = 503 if rag_status in {"failed", "skipped"} else 500
