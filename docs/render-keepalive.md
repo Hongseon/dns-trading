@@ -19,9 +19,9 @@ Add this repository secret in GitHub:
   not just the web process.
 - Prevents the 15-minute Render free-tier idle sleep from triggering.
 - Reduces first-request failures from KakaoTalk skill timeouts.
-- Retries timeouts and transient network errors long enough to survive Render
-  cold starts. GitHub Actions `exit code 28` typically means the `curl`
-  request hit its timeout window before Render finished waking up.
+- Retries timeouts and transient network errors with an extended timeout window
+  to survive Render cold starts. GitHub Actions `exit code 28` means even the
+  expanded `curl` timeout budget was exhausted before Render finished waking.
 
 If `RENDER_WARMUP_URL` is not configured, the workflow automatically derives
 it by replacing the trailing `/health` in `RENDER_HEALTHCHECK_URL` with
