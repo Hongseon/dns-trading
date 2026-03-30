@@ -22,8 +22,15 @@ jobs:
 
           EFFECTIVE_WARMUP_URL="$WARMUP_URL"
           if [ -z "$EFFECTIVE_WARMUP_URL" ]; then
-            EFFECTIVE_WARMUP_URL="${HEALTHCHECK_URL%/health}/warmup"
+            if [ "${HEALTHCHECK_URL%/health}" != "$HEALTHCHECK_URL" ]; then
+              EFFECTIVE_WARMUP_URL="${HEALTHCHECK_URL%/health}/warmup"
+            else
+              EFFECTIVE_WARMUP_URL="${HEALTHCHECK_URL%/}/warmup"
+            fi
           fi
+
+          echo "Health URL: $HEALTHCHECK_URL"
+          echo "Warmup URL: $EFFECTIVE_WARMUP_URL"
 
           curl --fail --silent --show-error \
             --location \
@@ -36,7 +43,7 @@ jobs:
             --header "User-Agent: GitHubActions-RenderKeepAlive/1.0" \
             "$HEALTHCHECK_URL"
 
-          curl --fail --silent --show-error \
+          warmup_status=$(curl --silent --show-error \
             --location \
             --connect-timeout 10 \
             --max-time 60 \
@@ -44,5 +51,20 @@ jobs:
             --retry-all-errors \
             --retry-delay 20 \
             --retry-max-time 240 \
+            --output /tmp/render-warmup-response.txt \
+            --write-out "%{http_code}" \
             --header "User-Agent: GitHubActions-RenderKeepAlive/1.0" \
-            "$EFFECTIVE_WARMUP_URL"
+            "$EFFECTIVE_WARMUP_URL")
+
+          echo "Warmup HTTP status: $warmup_status"
+          cat /tmp/render-warmup-response.txt
+
+          if [ "$warmup_status" = "404" ]; then
+            echo "Warmup endpoint is not available on the deployed service yet; keeping health-only mode."
+            exit 0
+          fi
+
+          if [ "$warmup_status" != "200" ]; then
+            echo "Warmup request failed with HTTP $warmup_status"
+            exit 1
+          fi
