@@ -12,7 +12,6 @@ import logging
 
 from fastapi import APIRouter, Request
 
-from src.rag.chain import get_chain
 from src.server.callback import process_and_callback, process_briefing_and_callback
 
 logger = logging.getLogger(__name__)
@@ -22,6 +21,13 @@ router = APIRouter()
 # ------------------------------------------------------------------
 # Helper
 # ------------------------------------------------------------------
+
+
+def get_chain():
+    """Load the shared RAG chain lazily for faster cold-start responses."""
+    from src.rag.chain import get_chain as _get_chain
+
+    return _get_chain()
 
 
 def make_kakao_response(text: str, use_callback: bool = False) -> dict:

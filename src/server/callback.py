@@ -18,8 +18,6 @@ import logging
 
 import httpx
 
-from src.rag.chain import get_chain
-
 logger = logging.getLogger(__name__)
 
 _CALLBACK_TIMEOUT = 10.0  # seconds for the outbound POST
@@ -28,6 +26,13 @@ _CALLBACK_TIMEOUT = 10.0  # seconds for the outbound POST
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
+
+def get_chain():
+    """Load the shared RAG chain lazily in background callback tasks."""
+    from src.rag.chain import get_chain as _get_chain
+
+    return _get_chain()
 
 
 def _build_callback_payload(text: str) -> dict:

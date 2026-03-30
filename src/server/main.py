@@ -11,10 +11,15 @@ import logging
 from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 
 from src.server.admin import router as admin_router
 from src.server.skill_handler import router as skill_router
-from src.server.warmup import start_rag_warmup
+from src.server.warmup import (
+    ensure_rag_warmup,
+    get_rag_warmup_status,
+    start_rag_warmup,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -51,6 +56,22 @@ app = FastAPI(
 async def health():
     """Health-check endpoint (also used by UptimeRobot to prevent Render sleep)."""
     return {"status": "ok"}
+
+
+@app.get("/warmup")
+async def warmup():
+    """Readiness endpoint that waits for RAG warmup to complete."""
+    warmed = await ensure_rag_warmup(app.state)
+    rag_status = get_rag_warmup_status(app.state)
+
+    if warmed:
+        return {"status": "ok", "rag": rag_status}
+
+    status_code = 503 if rag_status in {"failed", "skipped"} else 500
+    return JSONResponse(
+        status_code=status_code,
+        content={"status": "error", "rag": rag_status},
+    )
 
 
 app.include_router(skill_router)

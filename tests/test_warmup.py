@@ -42,3 +42,38 @@ class TestWarmRagDependencies:
             result = asyncio.run(warmup.warm_rag_dependencies())
 
         assert result is False
+
+
+class TestWarmupTaskHelpers:
+    """Warmup task helpers should deduplicate work and expose state."""
+
+    def test_ensure_rag_warmup_reuses_running_task(self):
+        class AppState:
+            pass
+
+        app_state = AppState()
+
+        async def runner():
+            task = asyncio.create_task(asyncio.sleep(0.01, result=True))
+            app_state.rag_warmup_task = task
+            result = await warmup.ensure_rag_warmup(app_state)
+            assert result is True
+            assert app_state.rag_warmup_task is task
+
+        asyncio.run(runner())
+
+    def test_get_rag_warmup_status_reports_ready(self):
+        class DoneTask:
+            def cancelled(self) -> bool:
+                return False
+
+            def done(self) -> bool:
+                return True
+
+            def result(self) -> bool:
+                return True
+
+        class AppState:
+            rag_warmup_task = DoneTask()
+
+        assert warmup.get_rag_warmup_status(AppState()) == "ready"
