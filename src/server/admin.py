@@ -11,7 +11,6 @@ import logging
 from fastapi import APIRouter, HTTPException, Query
 
 from src.config import settings
-from src.server.chat_logger import get_recent_logs, get_usage_summary
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +42,8 @@ async def admin_logs(
     offset: int = Query(0, ge=0),
 ):
     """Return recent chat logs ordered by newest first."""
+    from src.server.chat_logger import get_recent_logs
+
     _check_key(key)
 
     logs, total = get_recent_logs(limit=limit, offset=offset)
@@ -60,6 +61,8 @@ async def admin_usage(
     period: str = Query("daily", description="daily | weekly | monthly | all"),
 ):
     """Return aggregated usage/cost summary for the given period."""
+    from src.server.chat_logger import get_usage_summary
+
     _check_key(key)
 
     if period not in ("daily", "weekly", "monthly", "all"):
