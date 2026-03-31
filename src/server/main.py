@@ -18,6 +18,7 @@ from src.server.skill_handler import router as skill_router
 from src.server.warmup import (
     ensure_rag_warmup_started,
     get_rag_warmup_status,
+    start_rag_warmup,
 )
 
 logging.basicConfig(
@@ -29,15 +30,15 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan handler -- log startup and cancel background tasks."""
+    """Application lifespan handler -- log startup, warm dependencies, shutdown."""
     logger.info("Starting DnS Trading RAG Bot...")
-    app.state.rag_warmup_task = None
+    warmup_task = start_rag_warmup()
+    app.state.rag_warmup_task = warmup_task
 
     try:
         yield
     finally:
-        warmup_task = getattr(app.state, "rag_warmup_task", None)
-        if warmup_task is not None and not warmup_task.done():
+        if not warmup_task.done():
             warmup_task.cancel()
             with suppress(asyncio.CancelledError):
                 await warmup_task
