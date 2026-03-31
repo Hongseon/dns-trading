@@ -49,30 +49,6 @@ class TestHealth:
         assert data == {"status": "ok"}
 
 
-class TestWarmupEndpoint:
-    """GET /warmup should reflect RAG readiness for the keepalive workflow."""
-
-    @patch("src.server.main.get_rag_warmup_status", return_value="ready")
-    @patch("src.server.main.ensure_rag_warmup", new_callable=AsyncMock)
-    def test_warmup_ready(self, mock_ensure_warmup, mock_status):
-        mock_ensure_warmup.return_value = True
-
-        response = client.get("/warmup")
-
-        assert response.status_code == 200
-        assert response.json() == {"status": "ok", "rag": "ready"}
-
-    @patch("src.server.main.get_rag_warmup_status", return_value="failed")
-    @patch("src.server.main.ensure_rag_warmup", new_callable=AsyncMock)
-    def test_warmup_failed(self, mock_ensure_warmup, mock_status):
-        mock_ensure_warmup.return_value = False
-
-        response = client.get("/warmup")
-
-        assert response.status_code == 503
-        assert response.json() == {"status": "error", "rag": "failed"}
-
-
 # ---------------------------------------------------------------------------
 # Tests -- /skill/query
 # ---------------------------------------------------------------------------

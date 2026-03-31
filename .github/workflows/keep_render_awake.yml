@@ -13,16 +13,10 @@ jobs:
       - name: Ping Render health endpoint
         env:
           HEALTHCHECK_URL: ${{ secrets.RENDER_HEALTHCHECK_URL }}
-          WARMUP_URL: ${{ secrets.RENDER_WARMUP_URL }}
         run: |
           if [ -z "$HEALTHCHECK_URL" ]; then
             echo "RENDER_HEALTHCHECK_URL is not set; skipping keepalive ping."
             exit 0
-          fi
-
-          EFFECTIVE_WARMUP_URL="$WARMUP_URL"
-          if [ -z "$EFFECTIVE_WARMUP_URL" ]; then
-            EFFECTIVE_WARMUP_URL="${HEALTHCHECK_URL%/health}/warmup"
           fi
 
           curl --fail --silent --show-error \
@@ -35,14 +29,3 @@ jobs:
             --retry-max-time 240 \
             --header "User-Agent: GitHubActions-RenderKeepAlive/1.0" \
             "$HEALTHCHECK_URL"
-
-          curl --fail --silent --show-error \
-            --location \
-            --connect-timeout 10 \
-            --max-time 60 \
-            --retry 2 \
-            --retry-all-errors \
-            --retry-delay 20 \
-            --retry-max-time 240 \
-            --header "User-Agent: GitHubActions-RenderKeepAlive/1.0" \
-            "$EFFECTIVE_WARMUP_URL"

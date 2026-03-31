@@ -11,15 +11,9 @@ import asyncio
 import logging
 
 from src.config import settings
+from src.rag.chain import get_chain
 
 logger = logging.getLogger(__name__)
-
-
-def get_chain():
-    """Load the shared RAG chain lazily to keep server startup lightweight."""
-    from src.rag.chain import get_chain as _get_chain
-
-    return _get_chain()
 
 
 def _has_required_settings() -> bool:
@@ -59,48 +53,3 @@ def start_rag_warmup() -> asyncio.Task[bool]:
         warm_rag_dependencies(),
         name="rag-startup-warmup",
     )
-
-
-async def ensure_rag_warmup(app_state) -> bool:
-    """Ensure there is a single shared warmup task and await its result."""
-    task: asyncio.Task[bool] | None = getattr(app_state, "rag_warmup_task", None)
-
-    if task is None or task.cancelled():
-        task = start_rag_warmup()
-        app_state.rag_warmup_task = task
-    elif task.done():
-        try:
-            if task.result():
-                return True
-        except Exception:
-            logger.exception("Stored RAG warmup task failed")
-
-        task = start_rag_warmup()
-        app_state.rag_warmup_task = task
-
-    try:
-        return await task
-    except Exception:
-        logger.exception("RAG warmup task crashed")
-        return False
-
-
-def get_rag_warmup_status(app_state) -> str:
-    """Return a human-readable status for the current warmup task."""
-    task: asyncio.Task[bool] | None = getattr(app_state, "rag_warmup_task", None)
-    if task is None:
-        return "idle"
-    if task.cancelled():
-        return "cancelled"
-    if not task.done():
-        return "warming"
-
-    try:
-        return "ready" if task.result() else _failed_warmup_status()
-    except Exception:
-        return "failed"
-
-
-def _failed_warmup_status() -> str:
-    """Classify a failed warmup for operators."""
-    return "skipped" if not _has_required_settings() else "failed"
