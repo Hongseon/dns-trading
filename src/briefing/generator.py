@@ -21,8 +21,6 @@ from src.server import chat_logger
 
 logger = logging.getLogger(__name__)
 
-_BRIEFING_LLM_TIMEOUT_SECONDS = 180
-
 # ------------------------------------------------------------------
 # Constants
 # ------------------------------------------------------------------
@@ -263,20 +261,11 @@ class BriefingGenerator:
         )
         usage: dict = {}
         try:
-            content, usage = await asyncio.wait_for(
-                self.generator._call_with_fallback(
-                    prompt,
-                    system_instruction=briefing_system,
-                    max_output_tokens=2048,
-                ),
-                timeout=_BRIEFING_LLM_TIMEOUT_SECONDS,
+            content, usage = await self.generator._call_with_fallback(
+                prompt,
+                system_instruction=briefing_system,
+                max_output_tokens=2048,
             )
-        except asyncio.TimeoutError:
-            logger.error(
-                "Briefing LLM call timed out after %d seconds",
-                _BRIEFING_LLM_TIMEOUT_SECONDS,
-            )
-            content = "브리핑 생성 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요."
         except Exception:
             logger.exception("Failed to generate briefing via LLM")
             content = "브리핑 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."

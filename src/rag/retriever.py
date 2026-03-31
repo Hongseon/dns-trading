@@ -32,14 +32,8 @@ class Retriever:
     """Retrieve relevant document chunks from Zilliz via vector similarity."""
 
     def __init__(self) -> None:
-        self.embedder: Embedder | None = None
+        self.embedder = Embedder()
         self.client = get_client()
-
-    def _get_embedder(self) -> Embedder:
-        """Create the embedder lazily so non-vector code paths stay lightweight."""
-        if self.embedder is None:
-            self.embedder = Embedder()
-        return self.embedder
 
     # ------------------------------------------------------------------
     # Core search
@@ -74,7 +68,7 @@ class Retriever:
             ``filename``, ``email_subject``, ``email_from``,
             ``created_date``, ``similarity``.
         """
-        query_embedding = self._get_embedder().embed(query)
+        query_embedding = self.embedder.embed(query)
 
         # Build filter expression
         filter_parts: list[str] = []

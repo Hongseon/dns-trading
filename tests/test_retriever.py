@@ -227,27 +227,3 @@ class TestExtractSourcesDropboxNoFolder:
 
         assert len(sources) == 1
         assert "Dropbox/standalone.pdf" in sources[0]
-
-
-class TestDateRangeQueryAvoidsEmbedder:
-    """Date-range queries should not construct the embedder."""
-
-    def test_search_by_date_range_does_not_initialise_embedder(self):
-        with patch("src.rag.retriever.Embedder") as MockEmbedder, \
-             patch("src.rag.retriever.get_client") as mock_get_client:
-            mock_client = MagicMock()
-            mock_client.query.return_value = []
-            mock_get_client.return_value = mock_client
-
-            from src.rag.retriever import Retriever
-
-            retriever = Retriever()
-            retriever.search_by_date_range(
-                date_field="created_date",
-                start_date="2025-01-01T00:00:00+09:00",
-                end_date="2025-01-31T23:59:59+09:00",
-                source_type="dropbox",
-                limit=10,
-            )
-
-            MockEmbedder.assert_not_called()
