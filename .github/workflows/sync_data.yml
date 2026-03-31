@@ -17,6 +17,11 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
       - run: pip install -r requirements.txt
+      - name: Probe Zilliz connectivity
+        run: timeout 90s python scripts/check_zilliz_connection.py
+        env:
+          ZILLIZ_URI: ${{ secrets.ZILLIZ_URI }}
+          ZILLIZ_TOKEN: ${{ secrets.ZILLIZ_TOKEN }}
       - run: python scripts/full_sync.py
         env:
           ZILLIZ_URI: ${{ secrets.ZILLIZ_URI }}
