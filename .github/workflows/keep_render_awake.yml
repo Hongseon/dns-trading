@@ -8,7 +8,7 @@ on:
 jobs:
   ping:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
       - name: Ping Render health endpoint
         env:
@@ -31,28 +31,26 @@ jobs:
 
           echo "Health URL: $HEALTHCHECK_URL"
           echo "Warmup URL: $EFFECTIVE_WARMUP_URL"
-          echo "Pinging health endpoint..."
 
           curl --fail --silent --show-error \
             --location \
-            --connect-timeout 20 \
-            --max-time 120 \
-            --retry 3 \
+            --connect-timeout 10 \
+            --max-time 60 \
+            --retry 2 \
             --retry-all-errors \
-            --retry-delay 30 \
-            --retry-max-time 480 \
+            --retry-delay 20 \
+            --retry-max-time 240 \
             --header "User-Agent: GitHubActions-RenderKeepAlive/1.0" \
             "$HEALTHCHECK_URL"
 
-          echo "Pinging warmup endpoint..."
           warmup_status=$(curl --silent --show-error \
             --location \
-            --connect-timeout 20 \
-            --max-time 120 \
-            --retry 3 \
+            --connect-timeout 10 \
+            --max-time 60 \
+            --retry 2 \
             --retry-all-errors \
-            --retry-delay 30 \
-            --retry-max-time 480 \
+            --retry-delay 20 \
+            --retry-max-time 240 \
             --output /tmp/render-warmup-response.txt \
             --write-out "%{http_code}" \
             --header "User-Agent: GitHubActions-RenderKeepAlive/1.0" \
