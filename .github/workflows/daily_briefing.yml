@@ -1,4 +1,6 @@
 name: Daily Briefing
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 on:
   schedule:
     # UTC Mon-Fri 10:00 = KST Mon-Fri 19:00
@@ -17,15 +19,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-      - name: Cache pip
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: pip-${{ hashFiles('requirements.txt') }}
+          cache: 'pip'
       - run: pip install -r requirements.txt
 
       - name: Determine briefing type
