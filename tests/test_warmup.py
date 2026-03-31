@@ -47,21 +47,6 @@ class TestWarmRagDependencies:
 class TestWarmupTaskHelpers:
     """Warmup task helpers should deduplicate work and expose state."""
 
-    def test_ensure_rag_warmup_started_reuses_running_task(self):
-        class AppState:
-            pass
-
-        app_state = AppState()
-
-        async def runner():
-            task = asyncio.create_task(asyncio.sleep(0.01, result=True))
-            app_state.rag_warmup_task = task
-            result = warmup.ensure_rag_warmup_started(app_state)
-            assert result is task
-            assert app_state.rag_warmup_task is task
-
-        asyncio.run(runner())
-
     def test_ensure_rag_warmup_reuses_running_task(self):
         class AppState:
             pass

@@ -53,25 +53,19 @@ class TestWarmupEndpoint:
     """GET /warmup should reflect RAG readiness for the keepalive workflow."""
 
     @patch("src.server.main.get_rag_warmup_status", return_value="ready")
-    @patch("src.server.main.ensure_rag_warmup_started")
-    def test_warmup_ready(self, mock_start_warmup, mock_status):
+    @patch("src.server.main.ensure_rag_warmup", new_callable=AsyncMock)
+    def test_warmup_ready(self, mock_ensure_warmup, mock_status):
+        mock_ensure_warmup.return_value = True
 
         response = client.get("/warmup")
 
         assert response.status_code == 200
         assert response.json() == {"status": "ok", "rag": "ready"}
 
-    @patch("src.server.main.get_rag_warmup_status", return_value="warming")
-    @patch("src.server.main.ensure_rag_warmup_started")
-    def test_warmup_warming(self, mock_start_warmup, mock_status):
-        response = client.get("/warmup")
-
-        assert response.status_code == 200
-        assert response.json() == {"status": "ok", "rag": "warming"}
-
     @patch("src.server.main.get_rag_warmup_status", return_value="failed")
-    @patch("src.server.main.ensure_rag_warmup_started")
-    def test_warmup_failed(self, mock_start_warmup, mock_status):
+    @patch("src.server.main.ensure_rag_warmup", new_callable=AsyncMock)
+    def test_warmup_failed(self, mock_ensure_warmup, mock_status):
+        mock_ensure_warmup.return_value = False
 
         response = client.get("/warmup")
 
