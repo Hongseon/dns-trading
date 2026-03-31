@@ -8,6 +8,7 @@ Also handles collection creation on first use.
 from __future__ import annotations
 
 import logging
+from urllib.parse import urlparse
 
 from pymilvus import MilvusClient, DataType
 
@@ -16,6 +17,14 @@ from src.config import settings
 logger = logging.getLogger(__name__)
 
 _client: MilvusClient | None = None
+
+
+def _ensure_port(uri: str) -> str:
+    """Ensure the URI has an explicit port (default 443 for https)."""
+    parsed = urlparse(uri)
+    if parsed.port is None and parsed.scheme == "https":
+        return uri.replace(parsed.hostname, f"{parsed.hostname}:443", 1)
+    return uri
 
 
 def get_client() -> MilvusClient:
@@ -31,8 +40,9 @@ def get_client() -> MilvusClient:
             "Check your .env file or environment variables."
         )
 
-    logger.info("Initializing Zilliz client for %s", settings.zilliz_uri)
-    _client = MilvusClient(uri=settings.zilliz_uri, token=settings.zilliz_token)
+    uri = _ensure_port(settings.zilliz_uri)
+    logger.info("Initializing Zilliz client for %s", uri)
+    _client = MilvusClient(uri=uri, token=settings.zilliz_token)
 
     return _client
 

@@ -38,12 +38,21 @@ def _extract_host(uri: str) -> str:
     return uri.split("://", 1)[-1].split("/", 1)[0].split(":", 1)[0]
 
 
+def _ensure_port(uri: str) -> str:
+    """Ensure the URI has an explicit port (default 443 for https)."""
+    parsed = urlparse(uri)
+    if parsed.port is None and parsed.scheme == "https":
+        return uri.replace(parsed.hostname, f"{parsed.hostname}:443", 1)
+    return uri
+
+
 def main() -> None:
     """Probe DNS, client construction, and one cheap Milvus API call."""
     if not settings.zilliz_uri or not settings.zilliz_token:
         raise ValueError("ZILLIZ_URI and ZILLIZ_TOKEN must be set for diagnostics.")
 
-    host = _extract_host(settings.zilliz_uri)
+    uri = _ensure_port(settings.zilliz_uri)
+    host = _extract_host(uri)
     logger.info("Starting Zilliz connectivity probe for host=%s", host)
 
     t0 = time.monotonic()
@@ -56,7 +65,7 @@ def main() -> None:
 
     t0 = time.monotonic()
     logger.info("Constructing MilvusClient")
-    client = MilvusClient(uri=settings.zilliz_uri, token=settings.zilliz_token)
+    client = MilvusClient(uri=uri, token=settings.zilliz_token)
     logger.info("MilvusClient constructed in %.2f s", time.monotonic() - t0)
 
     t0 = time.monotonic()
