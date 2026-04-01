@@ -19,10 +19,16 @@ jobs:
             exit 0
           fi
 
+          # Render free tier cold-starts can take 30-60s.
+          # Use generous timeout + retries so the first attempt wakes the server.
+          # Keepalive failure is non-critical -- never fail the workflow.
           curl --fail --silent --show-error \
             --location \
-            --max-time 30 \
-            --retry 2 \
-            --retry-delay 5 \
+            --max-time 90 \
+            --retry 3 \
+            --retry-delay 10 \
+            --retry-all-errors \
             --header "User-Agent: GitHubActions-RenderKeepAlive/1.0" \
-            "$HEALTHCHECK_URL"
+            "$HEALTHCHECK_URL" \
+            && echo "Ping succeeded" \
+            || echo "Ping failed (non-critical)"
